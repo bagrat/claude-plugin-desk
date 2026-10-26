@@ -1189,6 +1189,70 @@ def cmd_look(a):
     return 0
 
 
+# ---------------------------------------------------------------- the handoff backup
+
+BACKED_UP = (COLLECTION, INBOX, SETTINGS)
+
+
+def dump_dir(d):
+    """The out_dir that holds tasks/, inbox/ and settings/ (given it, or its tasks/)."""
+    d = Path(d)
+    return d.parent if d.name == COLLECTION else d
+
+
+def cmd_backup(a):
+    """Before a handoff: the cards, notes and look as read, in one JSON file with a timestamp."""
+    d = dump_dir(a.rows)
+    out = Path(a.out).resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if git_root(out.parent) and not a.private_repo:
+        sys.exit(f"{out} is inside a git repo; a project's repo may be public. Keep the backup in scratch "
+                 "or the private place the project names (--private-repo once you know that repo is private)")
+    colls = {}
+    for c in BACKED_UP:
+        cd = d / c
+        rows = [load_row(p) for p in sorted(cd.glob("*.json")) if not p.name.startswith("_")] if cd.is_dir() else []
+        colls[c] = {r.id: r.data for r in rows}
+    if not colls[COLLECTION]:
+        sys.exit(f"no cards under {d / COLLECTION}: read tasks, inbox and settings into one out_dir first")
+    out.write_text(json.dumps({"page": PAGE, "at": iso(now_arg(a.now)), "collections": colls},
+                              ensure_ascii=False, indent=2) + "\n")
+    print(f"backup: {out}: " + ", ".join(f"{len(v)} {c}" for c, v in colls.items()))
+    return 0
+
+
+def cmd_restore(a):
+    """The writes that put a backup back: a set per row, and with --rows a delete per card or
+    setting the backup doesn't have. Notes that came in since stay: the owner wrote them."""
+    b = json.loads(Path(a.file).read_text())
+    if PAGE and b.get("page") and b["page"] != PAGE:
+        sys.exit(f"this backup is of {b['page']}, not this Desk's page {PAGE}")
+    out = Path(a.out) if a.out else Path(tempfile.mkdtemp(prefix="desk-restore-"))
+    writes = []
+    for c, rows in b["collections"].items():
+        (out / c).mkdir(parents=True, exist_ok=True)
+        for rid, data in rows.items():
+            f = out / c / f"{rid}.json"
+            f.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+            writes.append(entry_for(c, rid, f))
+    if a.rows:
+        d = dump_dir(a.rows)
+        for c, rows in b["collections"].items():
+            cd = d / c
+            if c != INBOX and cd.is_dir():
+                versions = load_versions(cd)
+                for p in sorted(cd.glob("*.json")):
+                    r = load_row(p)
+                    if not p.name.startswith("_") and r.id not in rows:
+                        e = {"op": "delete", "collection": c, "doc_id": r.id}
+                        v = r.version if r.version is not None else versions.get(r.id)
+                        if v is not None:
+                            e["if_version"] = v
+                        writes.append(e)
+    print(json.dumps({"page": b.get("page"), "at": b.get("at"), "writes": writes}, ensure_ascii=False, indent=2))
+    return 0
+
+
 def cmd_page(a):
     """The page to publish: the template with this Desk's title, keeper and first look."""
     tpl = Path(a.template) if a.template else (plugin_clone() or PLUGIN_REPO) / PAGE_PATH
@@ -1532,6 +1596,19 @@ def main(argv=None):
     s.add_argument("--out", help="the directory for look.json (default: beside --current's rows, "
                    "in patches/; without --current, a new temp directory)")
     s.set_defaults(fn=cmd_look)
+
+    s = sub.add_parser("backup", help="before a handoff: tasks, inbox and settings as read, in one JSON file")
+    s.add_argument("rows", help="the out_dir that holds tasks/, inbox/ and settings/")
+    s.add_argument("--out", required=True, help="the backup file: scratch or the project's private notes, never a public repo")
+    s.add_argument("--private-repo", action="store_true", help="allow --out inside a git repo known to be private")
+    s.add_argument("--now")
+    s.set_defaults(fn=cmd_backup)
+
+    s = sub.add_parser("restore", help="the writes that put a backup back")
+    s.add_argument("file")
+    s.add_argument("--out", help="the directory for the row files (default: a new temp directory)")
+    s.add_argument("--rows", help="a fresh read: also delete the rows the backup doesn't have")
+    s.set_defaults(fn=cmd_restore)
 
     s = sub.add_parser("page", help="the page to publish, for this Desk")
     s.add_argument("--out", required=True)

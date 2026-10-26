@@ -74,8 +74,19 @@ When the Desk orchestrator says a fix merged, or `prep` says Desk has an update,
 
 ## Handing off
 
-When your context is nearly full or the owner asks: write the live state (waiting cards, live
-sessions and what each waits on, anything mid-flight) where this project keeps such notes,
-spawn the new keeper with this project's repo as its source, update `keeper` in
-`.claude/desk.json`, move your scheduled tasks to it (recreate each, then delete the old),
-tell every live child its new parent, hand over the page's watch, then archive yourself.
+When your context is nearly full or the owner asks:
+
+1. **Back up the Desk first.** Read tasks, inbox and settings fresh into one new directory
+   (ArtifactData `list` each, the same `out_dir: <scratch>/handoff-<HHMM>`), then
+   `python3 $S backup <dir> --out <file>`. Keep the file in the private place the project
+   names for its notes (or your scratch, when it names none), never in the plugin's repo nor any repo that may be public
+   (`backup` refuses a git repo unless you pass `--private-repo`, which you do only for a repo
+   you know is private). Name the file in the handoff notes. If a write goes wrong mid-handoff,
+   `python3 $S restore <file> --rows <a fresh read>` prints the writes that put it back; send
+   them with ArtifactData `batch`.
+2. Write the live state (waiting cards, live sessions and what each waits on, anything
+   mid-flight) where this project keeps such notes, spawn the new keeper with this project's
+   repo as its source, update `keeper` in `.claude/desk.json`, move your scheduled tasks to it
+   (recreate each, then delete the old), tell every live child its new parent, hand over the
+   page's watch, then archive yourself. A backup in your scratch goes with you; the new keeper
+   can restore only from the project's private place.
