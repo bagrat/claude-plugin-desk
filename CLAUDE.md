@@ -22,5 +22,6 @@ Examples in tests and docs are made up.
 
 This repo is also the home of the **Desk orchestrator**, the keeper of Desk's own Desk ("Desk
 Desk", named in `.claude/desk.json`). It gets the fixers' reports, puts their questions and news
-on Desk Desk, and, when a fix merges, tells every other keeper it knows of to run `/desk:update`. It loads the
+on Desk Desk, and, when a fix merges, tells every other keeper it knows of to run `/desk:update`, and
+archives the fixer once it reports done. It loads the
 `desk-keeper` and `desk` skills like any keeper. Its cards are about Desk's behavior only.
