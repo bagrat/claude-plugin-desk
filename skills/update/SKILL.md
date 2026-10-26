@@ -1,6 +1,6 @@
 ---
 name: update
-description: Bring this Desk up to the plugin's latest rules and page. Use when the Desk orchestrator says a fix merged, when the owner asks to update Desk, or runs /desk:update. Keeper only.
+description: Bring this Desk up to the plugin's latest rules and page. Use when the Desk orchestrator says a fix merged, when prep says Desk has an update, when the owner asks to update Desk, or runs /desk:update. Keeper only.
 ---
 
 # Updating Desk
