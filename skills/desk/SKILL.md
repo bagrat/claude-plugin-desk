@@ -59,6 +59,8 @@ directory; `--desk FILE` (before the command) or `$DESK_CONFIG` names another.
 | `python3 $S sorted $R <note-id> […]` | The deletes for notes now held by cards. |
 | `python3 $S note --text "…" --from <where> --out DIR [--image ID=caption]` | A note for this Desk's Inbox (what `/desk:note` runs). |
 | `python3 $S look [--theme T] [--emoji E \| --image ASSET \| --letter L] [--current row.json] [--list]` | The `settings/look` row (rule 16). |
+| `python3 $S backup $R --out FILE [--private-repo]` | Before a handoff: the cards, notes and look as read, in one JSON file with a timestamp. Refuses a file inside a git repo (a project's repo may be public) unless `--private-repo`. |
+| `python3 $S restore FILE [--rows $R] [--out DIR]` | The writes that put a backup back: a `set` per row; with a fresh read, also a `delete` per card or setting the backup lacks (new notes stay). |
 | `python3 $S page --out FILE` | The page to publish for this Desk: the template with its title, keeper and look. |
 | `python3 $S scrub DRAFT [--rows $R]` | What in a feedback draft might carry the Desk's content (rule 17). |
 | `python3 $S issue-url --title T --body FILE [--rows $R]` | A prefilled new-issue link on the plugin's repo; refuses while `scrub` flags anything. |
