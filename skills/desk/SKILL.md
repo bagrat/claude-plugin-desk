@@ -123,8 +123,8 @@ it.
 7. **Rank.** Blocking or time-sensitive first, then reviews, then decisions, then checks by
    hand. A card can be bumped by hand: the rank you want and `rankByHand: true`.
 8. **The footer.** Every message to the owner ends with a horizontal rule, then one link:
-   `[✦ K · ☝︎ N · ∙•● M](<page>#news)`, K news, N waiting minus snoozed, M working, counted from
-   the rows read fresh (`footer`), never from memory. Without news: `[☝︎ N · ∙•● M](<page>#waiting)`.
+   `[✦ K ··· ● N ··· ◌ M](<page>#news)`, K news, N waiting minus snoozed, M working, counted from
+   the rows read fresh (`footer`), never from memory. Without news: `[● N ··· ◌ M](<page>#waiting)`.
 9. **Finished tasks.** No Done list. A finished task with something to tell becomes news with
    its recap (`move … news --context …`). Anything to try by hand stays a Waiting card (kind
    `check`). Otherwise the card closes on their answer (`move … done`).

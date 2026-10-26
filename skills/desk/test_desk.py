@@ -118,7 +118,7 @@ class Footer(Base):
         self.put("e", {"state": "scheduled", "title": "r"})
         code, out, _ = self.run_cli("footer", self.root / "dump", "--now", NOW)
         self.assertEqual(code, 0)
-        self.assertEqual(out.strip(), "[☝︎ 2 · ∙•● 1](https://claude.ai/artifact/DESKTEST#waiting)")
+        self.assertEqual(out.strip(), "[● 2 ··· ◌ 1](https://claude.ai/artifact/DESKTEST#waiting)")
 
 
 class Order(Base):
@@ -255,7 +255,7 @@ class Checks(Base):
         code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-fetch-rules")
         self.assertEqual(code, 1)
         self.assertIn("Waiting:", out)
-        self.assertIn("[☝︎ 1 · ∙•● 0]", out)
+        self.assertIn("[● 1 ··· ◌ 0]", out)
 
 
 class Move(Base):
@@ -375,11 +375,11 @@ class News(Base):
         self.put("a", waiting())
         self.put("b", working())
         _, out, _ = self.run_cli("footer", self.dir, "--now", NOW)
-        self.assertEqual(out.strip(), "[☝︎ 1 · ∙•● 1](https://claude.ai/artifact/DESKTEST#waiting)")
+        self.assertEqual(out.strip(), "[● 1 ··· ◌ 1](https://claude.ai/artifact/DESKTEST#waiting)")
         self.put("n1", news())
         self.put("n2", news())
         _, out, _ = self.run_cli("footer", self.dir, "--now", NOW)
-        self.assertEqual(out.strip(), "[✦ 2 · ☝︎ 1 · ∙•● 1](https://claude.ai/artifact/DESKTEST#news)")
+        self.assertEqual(out.strip(), "[✦ 2 ··· ● 1 ··· ◌ 1](https://claude.ai/artifact/DESKTEST#news)")
 
     def test_order_and_prep_list_news_first(self):
         self.put("a", waiting(title="A card"))
@@ -389,7 +389,7 @@ class News(Base):
         self.assertTrue(out.startswith("News:\n  - new: Newer news\n  - old: Older news\nWaiting:"), out)
         _, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-fetch-rules")
         self.assertLess(out.index("News:"), out.index("Waiting:"))
-        self.assertIn("[✦ 2 · ☝︎ 1 · ∙•● 0]", out)
+        self.assertIn("[✦ 2 ··· ● 1 ··· ◌ 0]", out)
         # No news: no News heading.
         (self.dir / "old.json").unlink()
         (self.dir / "new.json").unlink()
@@ -626,7 +626,7 @@ class RuleReload(Base):
     def test_nothing_changed_runs_on(self):
         code, out, err = self.prep()
         self.assertEqual(code, 0, out)
-        self.assertIn("[☝︎ 1", out)
+        self.assertIn("[● 1", out)
         self.assertIn("nothing marked loaded; taking HEAD", err)
 
     def test_a_changed_rule_stops_it(self):
@@ -636,7 +636,7 @@ class RuleReload(Base):
         self.assertIn("Stop: the rules changed", out)
         self.assertIn(".claude/skills/x/SKILL.md, CLAUDE.md", out)
         self.assertNotIn("README.md", out)
-        self.assertNotIn("☝︎", out)  # no footer
+        self.assertNotIn("◌", out)  # no footer
         # Pulled and re-read: marked loaded, it runs on.
         sh(self.clone, "pull", "-q", "origin", "main")
         code, out, err = self.run_cli("loaded", "--repo", self.clone, "--state", self.state)
@@ -667,7 +667,7 @@ class RuleReload(Base):
         code, out, err = self.prep()
         self.assertEqual(code, 0, out)
         self.assertIn("fetch failed", err)
-        self.assertIn("[☝︎ 1", out)
+        self.assertIn("[● 1", out)
 
     def test_default_repos(self):
         self.assertIn(tasks.PLUGIN_REPO.resolve(), [r.resolve() for r in tasks.rule_repos()] if (tasks.PLUGIN_REPO / ".git").exists() else [tasks.PLUGIN_REPO.resolve()])
@@ -722,7 +722,7 @@ class DeskTests(Base):
         code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-fetch-rules")
         self.assertEqual(code, 1)
         self.assertIn("inbox n-1: sort this note", out)
-        self.assertIn("[☝︎ 1", out)
+        self.assertIn("[● 1", out)
         code, out, _ = self.run_cli("sorted", self.root / "dump", "n-1")
         self.assertEqual(json.loads(out), [{"op": "delete", "collection": "inbox", "doc_id": "n-1", "if_version": 3}])
         code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-fetch-rules")
