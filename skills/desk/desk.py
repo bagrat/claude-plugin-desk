@@ -68,6 +68,11 @@ OWNER_ASK = re.compile(
     r")\b|\b(recommended|recommendation)\s*:",
     re.I,
 )
+# An ask phrase that isn't open: after a negation ("nothing waits on you"), in the past ("was
+# your call") or a settled stamp ("(your call, 2026-01-01)").
+NEGATED = re.compile(r"(?:\b(?:nothing|no|not|none|never)|n't)(?:[^\S\n]+[\w']+){0,3}[^\S\n]*$", re.I)
+PAST = re.compile(r"\b(?:was|were|had been)[^\S\n]*$", re.I)
+STAMP = re.compile(r"^[^\S\n]*(?:,[^\S\n]*\d{4}-\d{2}-\d{2}[^\S\n]*)?\)")
 # A question aimed at the owner: a sentence ending in "?" that speaks to them.
 OWNER_Q = re.compile(r"[^.!?\n]*\b(you|your|should we|shall we|should i|shall i|ok to|okay to)\b[^.!?\n]*\?", re.I)
 SUPERSEDED = re.compile(r"\b(superseded|replaced|dropped|withdrawn|obsolete|no longer)\b|^\s*(old|was)\b|~~", re.I)
@@ -331,6 +336,15 @@ def quoted(text, m):
     return m.start() > 0 and text[m.start() - 1] in "\"“'‘"
 
 
+def settled(text, m):
+    """An ask phrase that puts no open question: negated, past, or a settled stamp."""
+    if text[m.end():m.end() + 1] == "?":
+        return False
+    before, after = text[:m.start()], text[m.end():]
+    return bool(NEGATED.search(before) or PAST.search(before)
+                or (before.rstrip().endswith("(") and STAMP.match(after)))
+
+
 def check(rows, now, sessions=None, stale_hours=12):
     """Problems, each (row id, message). Rules 1-5, 9, 12, 13 and 14."""
     out = []
@@ -433,7 +447,7 @@ def owner_asks(r):
     fields += [(f"details[{i}]", f"{f.get('title', '')}\n{f.get('text', '')}")
                for i, f in enumerate(d.get("details") or []) if f.get("title") != "Settled so far"]
     for field, t in fields:
-        m = next((m for m in OWNER_ASK.finditer(t) if not quoted(t, m)), None) or OWNER_Q.search(t)
+        m = next((m for m in OWNER_ASK.finditer(t) if not quoted(t, m) and not settled(t, m)), None) or OWNER_Q.search(t)
         if m:
             yield field, m.group(0).strip()
 
