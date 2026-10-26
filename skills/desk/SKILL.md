@@ -82,7 +82,7 @@ What the script does by itself:
 
 **The rule-reload check.** `prep` first compares the HEAD of the project's clone (where
 `desk.json` sits), of the plugin's clone and of each `watch` clone with what you last loaded;
-it never fetches, so it costs no time. The plugin's clone is the one `desk.py` runs from, or
+it never waits on the network, so it costs no time. The plugin's clone is the one `desk.py` runs from, or
 `~/.claude/desk` when it runs from a copy that isn't a clone (a plugin install). When a
 pull changed `CLAUDE.md`, `memory/MEMORY.md`, `.claude/skills/`, `.claude/desk.json`,
 `skills/` or `page/desk.html` since then, it stops: exit 1, no deck, no footer. Re-read each
@@ -94,7 +94,15 @@ goes through.
 
 **Updating.** New Desk rules arrive by `/desk:update` (the `update` skill): it pulls
 `~/.claude/desk` and does the above in one go. The keeper runs it when the Desk orchestrator
-says a fix merged; the owner can run it any time.
+says a fix merged, or when `prep` says so; the owner can run it any time.
+
+**The update check.** Keepers also notice updates by themselves (2026-10-26). At most once
+every 6 hours, `prep` starts a fetch of the plugin's `main` into its clone, detached, so it
+never waits on the network; when it last did is kept next to the loaded commits
+(`fetched.json`). When a later `prep` sees that fetched `main` changed a rule file past what
+you loaded, it stops: "Desk has an update", exit 1, no deck, no footer. Run `/desk:update` at
+once, without asking the owner, then `prep` again. Offline, no clone, or a failed fetch: it
+skips the check, silently. `--plugin DIR` names the clone to check.
 
 What `check` flags is in the script's messages; each line is `<id>: <problem>` and names the
 rule. A failing check is work before the message, not a note in it. When a flag is wrong (a

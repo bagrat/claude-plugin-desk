@@ -650,6 +650,11 @@ class RuleReload(Base):
         self.state = self.root / "state" / "loaded.json"
         self.put("a", waiting())
 
+    def tearDown(self):
+        while tasks.BACKGROUND:  # let the background fetches finish before the clones go
+            tasks.BACKGROUND.pop().wait(timeout=30)
+        super().tearDown()
+
     def commit(self, repo, files):
         for name, text in files.items():
             (repo / name).parent.mkdir(parents=True, exist_ok=True)
@@ -702,7 +707,8 @@ class RuleReload(Base):
         self.assertIn("behind origin/main on CLAUDE.md", err)
 
     def test_prep_never_fetches(self):
-        # prep judges by the clone's HEAD alone: no network, so a change upstream waits for a pull.
+        # The reload check judges by the clone's HEAD alone (the plugin's clone, not watched here,
+        # gets no background fetch): a change upstream waits for a pull.
         self.run_cli("loaded", "--repo", self.clone, "--state", self.state)
         sh(self.clone, "remote", "set-url", "origin", str(self.root / "nowhere.git"))
         code, out, err = self.prep()
@@ -712,6 +718,61 @@ class RuleReload(Base):
         self.commit(self.seed, {"CLAUDE.md": "newer"})
         self.assertEqual(self.prep()[0], 0)
         self.assertNotEqual(sh(self.clone, "rev-parse", "origin/main"), sh(self.seed, "rev-parse", "HEAD"))
+
+    def prep_plugin(self):
+        return self.run_cli("prep", self.dir, "--now", NOW, "--repo", self.clone, "--plugin", self.clone,
+                            "--state", self.state)
+
+    def test_prep_notices_an_update_in_the_background(self):
+        self.run_cli("loaded", "--repo", self.clone, "--state", self.state)
+        self.commit(self.seed, {"skills/desk/SKILL.md": "new rules"})
+        # The first prep starts the fetch and runs on: it never waits for it.
+        ahead, proc = tasks.update_check(self.clone, self.state)
+        self.assertIsNone(ahead)
+        self.assertIsNotNone(proc)
+        proc.wait(timeout=30)
+        self.assertEqual(sh(self.clone, "rev-parse", "origin/main"), sh(self.seed, "rev-parse", "HEAD"))
+        self.assertNotEqual(sh(self.clone, "rev-parse", "HEAD"), sh(self.seed, "rev-parse", "HEAD"))
+        # The next one sees the fetched main ahead of what was loaded: it stops, no deck, no footer.
+        code, out, _ = self.prep_plugin()
+        self.assertEqual(code, 1, out)
+        self.assertIn("Desk has an update", out)
+        self.assertIn("/desk:update", out)
+        self.assertNotIn("[●", out)
+        # /desk:update pulls it; once loaded, prep runs on.
+        self.update()
+        self.run_cli("loaded", "--repo", self.clone, "--state", self.state)
+        self.assertEqual(self.prep_plugin()[0], 0)
+
+    def test_an_update_that_misses_the_rules_doesnt_stop_it(self):
+        self.run_cli("loaded", "--repo", self.clone, "--state", self.state)
+        self.commit(self.seed, {"README.md": "r2"})
+        sh(self.clone, "fetch", "-q", "origin", "main")
+        self.assertEqual(self.prep_plugin()[0], 0)
+
+    def test_fetches_at_most_every_six_hours(self):
+        t = 1_000_000.0
+        _, proc = tasks.update_check(self.clone, self.state, now=t)
+        proc.wait(timeout=30)
+        stamps = json.loads(tasks.fetched_path(self.state).read_text())
+        self.assertEqual(stamps, {str(self.clone.resolve()): t})
+        self.assertIsNone(tasks.update_check(self.clone, self.state, now=t + 5 * 3600)[1])
+        _, proc = tasks.update_check(self.clone, self.state, now=t + 6 * 3600)
+        self.assertIsNotNone(proc)
+        proc.wait(timeout=30)
+
+    def test_offline_or_missing_clone_never_fails_or_slows_prep(self):
+        self.run_cli("loaded", "--repo", self.clone, "--state", self.state)
+        sh(self.clone, "remote", "set-url", "origin", "https://127.0.0.1:9/nowhere.git")
+        start = time.monotonic()
+        code, out, err = self.prep_plugin()
+        self.assertLess(time.monotonic() - start, 5)
+        self.assertEqual((code, err), (0, ""), out)
+        self.assertIn("[● 1", out)
+        self.assertEqual(tasks.update_check(self.root / "missing", self.state), (None, None))
+        code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--repo", self.clone,
+                                    "--plugin", self.root / "missing", "--state", self.state)
+        self.assertEqual(code, 0, out)
 
     def test_a_pull_made_elsewhere_still_stops_it(self):
         self.run_cli("loaded", "--repo", self.clone, "--state", self.state)
