@@ -40,7 +40,7 @@ THEMES = ("frost", "moss", "ember", "berry", "plum", "sand", "mauve", "rose", "f
 DELETE = {"__delete__": True}
 ANSWER_FIELDS = ("answer", "answeredAt", "quick", "quickAt", "answerSent")
 STATES = {"news", "waiting", "working", "scheduled", "done"}
-KINDS = {"decide", "review", "check", "do", "info", "close"}
+KINDS = {"decide", "review", "check", "do", "step", "info", "close"}
 # A card's dependsOn items: a linked card's state, as its item should read it.
 DEP_STATES = ("done", "building", "open")
 # A news item is a finished task: done, for the cards that wait on it.
@@ -49,7 +49,7 @@ DEP_OF_STATE = {"working": "building", "waiting": "open", "held": "open", "sched
 NEWS_DROPS = ("ask", "recommend", "ifNone") + ANSWER_FIELDS + ("workingSince", "snoozeUntil", "heldAt", "pushedAt", "activeAt",
                                                               "rank", "rankByHand", "blocks", "kind", "note", "num")
 # Rule 7: blocking or time-sensitive first, then reviews, then decisions, then checks by hand.
-KIND_ORDER = {"review": 0, "decide": 1, "do": 2, "check": 3, "info": 4, "close": 5}
+KIND_ORDER = {"review": 0, "decide": 1, "step": 2, "do": 2, "check": 3, "info": 4, "close": 5}
 ACTIVE_HOURS = 3
 # Rule 13: when the keeper last pushed the owner about a waiting card.
 PUSHED = "pushedAt"
@@ -401,11 +401,15 @@ def check(rows, now, sessions=None, stale_hours=12):
                 stale.append("quick")
             if stale:
                 say(r, f"waiting but still carries {', '.join(stale)}: move it to waiting again (rule 5)")
-            for k in ("ask", "recommend"):
+            # A step only the owner can do off the page: the ask is the step, its link the button.
+            for k in ("ask",) if kind == "step" else ("ask", "recommend"):
                 if not str(r.get(k) or "").strip():
                     say(r, f"waiting with no {k} (rule 3)")
             if not isinstance(r.get("num"), int):
                 say(r, "waiting with no number: `rank` gives it one (the owner answers by “#N”)")
+            if kind == "step" and not step_link(r.data):
+                say(r, "a step off the page (kind step) with no link: put it first in links, "
+                       f"move {r.id} waiting --link 'Label=https://…' (rule 10)")
             if needs_push(r, now):
                 say(r, "waiting and not pushed yet: push the owner (one push for all new ones), then `pushed` (rule 13)")
 
@@ -868,8 +872,14 @@ def settled_fold(details, text):
     return [{"title": "Settled so far", "text": text}] + details
 
 
+def step_link(d):
+    """A step card's main button: its first link, when it is https."""
+    first = (d.get("links") or [None])[0] or {}
+    return first if str(first.get("url") or "").startswith("https://") else None
+
+
 def move(row, to, now, note=None, ask=None, recommend=None, ifnone=None, settled=None,
-         session=None, active=False, context=None, rows=()):
+         session=None, active=False, context=None, kind=None, link=None, rows=()):
     """The patch for a move (rules 1, 5, 9, 14). None for done: the row is deleted. `held` is a
     waiting card held until the owner asks for it (rule 10)."""
     if to == "done":
@@ -886,6 +896,14 @@ def move(row, to, now, note=None, ask=None, recommend=None, ifnone=None, settled
         patch[HELD] = DELETE
     if context is not None:
         patch["context"] = context
+    if kind is not None:
+        if kind not in KINDS:
+            raise ValueError(f"unknown kind {kind!r}")
+        patch["kind"] = kind
+    if link:
+        label, _, url = link.partition("=") if "=" in link else ("Open", "", link)
+        have = [l for l in d.get("links") or [] if l.get("url") != url]
+        patch["links"] = [{"label": label, "url": url}] + have
     if to == "news":
         # Rule 14: something to know, cleared by Seen; nothing to answer, rank or push.
         if any(v is not None for v in (ask, recommend, ifnone)):
@@ -922,9 +940,13 @@ def move(row, to, now, note=None, ask=None, recommend=None, ifnone=None, settled
         for k, v in (("ask", ask), ("recommend", recommend), ("ifNone", ifnone)):
             if v is not None:
                 patch[k] = v
-        missing = [k for k in ("ask", "recommend") if not str(patch.get(k, d.get(k)) or "").strip()]
+        step = patch.get("kind", d.get("kind")) == "step"
+        need = ("ask",) if step else ("ask", "recommend")
+        missing = [k for k in need if not str(patch.get(k, d.get(k)) or "").strip()]
         if missing:
             raise ValueError(f"a waiting card needs {' and '.join(missing)} (rule 3)")
+        if step and not step_link({**d, **patch}):
+            raise ValueError("a step off the page (kind step) needs its link: --link 'Label=https://…' (rule 10)")
         if d.get("answer") and ask is None:
             raise ValueError("its ask was answered: give the new question with --ask (rules 1, 5)")
         if not isinstance(d.get("num"), int):
@@ -1387,7 +1409,8 @@ def cmd_move(a):
     rows, now = load_rows(a.rows), now_arg(a.now)
     r = find(rows, a.id)
     try:
-        patch = move(r, a.to, now, a.note, a.ask, a.recommend, a.ifnone, a.settled, a.session, a.active, a.context, rows)
+        patch = move(r, a.to, now, a.note, a.ask, a.recommend, a.ifnone, a.settled, a.session, a.active, a.context,
+                     a.kind, a.link, rows)
     except ValueError as e:
         print(f"refused: {e}", file=sys.stderr)
         return 2
@@ -1573,6 +1596,8 @@ def main(argv=None):
     s.add_argument("--ask")
     s.add_argument("--recommend")
     s.add_argument("--ifnone")
+    s.add_argument("--kind", choices=sorted(KINDS - {"close"}), help="set the kind; step: a step only the owner can do off the page (rule 10)")
+    s.add_argument("--link", help="the step's link, put first in links: 'Label=https://…'")
     s.add_argument("--settled", help="the text of the “Settled so far” fold, put at the top")
     s.add_argument("--session", help="add a session: 'Label=https://claude.ai/code/session_…'")
     s.add_argument("--active", action="store_true", help="set activeAt: the card under discussion")
