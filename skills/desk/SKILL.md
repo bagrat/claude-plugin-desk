@@ -86,7 +86,8 @@ origin/main changed `CLAUDE.md`, `memory/MEMORY.md`, `.claude/skills/`, `.claude
 footer. Then `git -C <clone> pull origin main`, re-read each file (load a changed skill
 again), and run `loaded`. When the page template changed, republish the Desk in place too:
 `page --out <file>`, then Artifact publish with the Desk's `url` (the cards, notes and look
-live in its database and stay). A failed fetch only warns. A plugin copy that isn't a git
+live in its database and stay). If the publish is refused and hands back the live page
+(often twice on the first switch), merge onto it and publish again until it goes through. A failed fetch only warns. A plugin copy that isn't a git
 clone (a plugin install on a computer) isn't checked: there, `claude plugin update`.
 
 What `check` flags is in the script's messages; each line is `<id>: <problem>` and names the

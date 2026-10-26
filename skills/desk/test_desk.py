@@ -765,6 +765,14 @@ class DeskTests(Base):
         self.assertIn('KEEPER="https://claude.ai/code/session_01X"', html)
         self.assertIn('ICON={"emoji": "🗂️"}', html)
         self.assertIn(PAGE, msg)
+        self.assertIn("refused", msg)
+
+    def test_skills_expect_refusals_on_republish(self):
+        # Issue #8: an in-place republish of a page last published elsewhere is refused (twice) first.
+        skills = tasks.PLUGIN_REPO / "skills"
+        for f in ("setup/SKILL.md", "desk/SKILL.md", "desk-keeper/SKILL.md"):
+            text = " ".join((skills / f).read_text().split())
+            self.assertIn("publish again until it goes through", text, f)
 
     def test_real_template_renders(self):
         out = self.root / "p.html"
