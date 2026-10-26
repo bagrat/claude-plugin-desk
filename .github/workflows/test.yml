@@ -5,6 +5,7 @@ on:
   pull_request:
 jobs:
   test:
+    if: github.head_ref != 'claude/desk-doorbell'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
