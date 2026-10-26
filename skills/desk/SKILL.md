@@ -44,11 +44,11 @@ directory; `--desk FILE` (before the command) or `$DESK_CONFIG` names another.
 | Command | What |
 | --- | --- |
 | `python3 $S sessions $R` | The sessions behind open cards, one per line, to check one by one (`get_session`). |
-| `python3 $S prep $R --sessions sessions.json` | **Before every message.** The rule-reload check, the checks, the notes to sort, the deck in the page's order, the footer. Exit 1 when anything is left to do. |
+| `python3 $S prep $R --sessions sessions.json` | **Before every message.** The rule-reload check, the checks, the notes to sort, the deck in the page's order, the footer. Exit 1 when anything is left to do. Refuses rows read more than 2 minutes ago (`--max-age MIN`). |
 | `python3 $S loaded` | Mark the rules reloaded, after you've re-read what `prep` or `update` named. |
 | `python3 $S update` | `/desk:update`: pull the plugin's clone at `~/.claude/desk` (clone it if missing) and name what changed since you loaded it. Exit 1 when there's something to re-read. |
 | `python3 $S check $R [--sessions …] [--stale-hours 12]` | The checks alone. |
-| `python3 $S footer $R` | The footer line, exactly. |
+| `python3 $S footer $R` | The footer line, exactly; refuses a dump older than 2 minutes, like `prep`. |
 | `python3 $S order $R` | News, then the waiting deck as the page shows it, then Later and In progress. |
 | `python3 $S rank $R` | Re-rank waiting cards by rule 7. |
 | `python3 $S move $R <id> news\|working\|waiting\|done [--context …] [--ask … --recommend … --ifnone …] [--note …] [--settled "…"] [--session "Label=url"] [--active] [--if-version N]` | The patch for a move. |
@@ -141,7 +141,9 @@ it.
 11. **One writer.** Only the keeper writes cards; other sessions report to it. The one write
     anyone else makes is a note into the Inbox (rule 15).
 12. **Before every message.** Rows and notes read fresh, only the sessions behind cards checked,
-    only changed cards written, by small edits. That's `prep`.
+    only changed cards written, by small edits. That's `prep`. Fresh means for this message, a
+    one-line one too: the owner's Seen deletes rows meanwhile. `prep` and `footer` refuse a dump
+    whose oldest row or note was written more than 2 minutes ago ("rows read N min ago").
 13. **A push for every new waiting card.** As soon as a card lands in Waiting (new, a new
     question, or back from a snooze), push the owner in the same turn: one push for all the new
     ones, each named by its title, the most urgent first. Then `pushed`.

@@ -16,6 +16,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -801,6 +802,32 @@ def set_images(row, images, fold=None, drop_top=False):
     return patch, sorted(before - after)
 
 
+# ---------------------------------------------------------------- a fresh read (rule 12)
+
+# How old a dump may be when prep and footer count it: Seen on the page deletes rows meanwhile.
+READ_MINUTES = 2
+
+
+def read_age(d):
+    """Seconds since the dump was read: its oldest row or note file, since the script's own
+    writes only make files newer. None when it holds none."""
+    files = [p for p in rows_dir(d).glob("*.json") if not p.name.startswith("_")]
+    i = inbox_dir(d)
+    if i:
+        files += [p for p in i.glob("*.json") if not p.name.startswith("_")]
+    if not files:
+        return None
+    return time.time() - min(p.stat().st_mtime for p in files)
+
+
+def stale_read(d, minutes=READ_MINUTES):
+    age = read_age(d)
+    if age is None or age <= minutes * 60:
+        return None
+    return (f"Stop: rows read {int(age // 60)} min ago: read them fresh (tasks and inbox, into a "
+            f"new directory) and run this again (rule 12).")
+
+
 # ---------------------------------------------------------------- the Inbox (rule 15)
 
 def inbox_dir(d):
@@ -1049,6 +1076,10 @@ def cmd_issue_url(a):
 
 
 def cmd_footer(a):
+    late = stale_read(a.rows, a.max_age)
+    if late:
+        print(late, file=sys.stderr)
+        return 1
     print(footer(load_rows(a.rows), now_arg(a.now)))
     return 0
 
@@ -1178,6 +1209,10 @@ def cmd_prep(a):
             print(f"Then re-read each file above (load the changed skills again) and run: "
                   f"python3 {Path(__file__).name} loaded. (/desk:update does all of it.)")
             return 1
+    late = stale_read(a.rows, a.max_age)
+    if late:
+        print(late)
+        return 1
     code = cmd_check(a)
     notes = load_inbox(a.rows)
     for n in notes:
@@ -1256,7 +1291,11 @@ def main(argv=None):
             rules_args(s)
             s.add_argument("--no-rules", "--no-fetch-rules", dest="no_rules", action="store_true",
                            help="skip the rule-reload check")
-    cmd("footer", cmd_footer, "the footer line")
+            s.add_argument("--max-age", type=float, default=READ_MINUTES,
+                           help=f"refuse rows read longer ago than this, in minutes (default {READ_MINUTES})")
+    s = cmd("footer", cmd_footer, "the footer line")
+    s.add_argument("--max-age", type=float, default=READ_MINUTES,
+                   help=f"refuse rows read longer ago than this, in minutes (default {READ_MINUTES})")
     cmd("order", cmd_order, "the order the page shows")
     cmd("sessions", cmd_sessions, "the sessions behind open cards, to check one by one")
     s = cmd("rank", cmd_rank, "re-rank waiting cards (rule 7); writes patches")

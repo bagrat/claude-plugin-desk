@@ -21,7 +21,8 @@ with this one. `S=<the desk skill's directory>/desk.py`.
 
 ## Before every message to the owner
 
-Every time, in this order:
+Every time, in this order, a one-line message too (never reuse an earlier turn's dump: the
+owner may have cleared news since):
 
 1. Read the rows and notes fresh (ArtifactData `list`, `collection` `tasks`, then `inbox`,
    the same new `out_dir: <scratch>/rows-<HHMM>`); paste each result into that collection's
@@ -36,7 +37,9 @@ Every time, in this order:
 5. `python3 $S prep <dir> --sessions <scratch>/sessions.json`. When it stops with "the rules
    changed", re-read each file it lists, republish the page if it says the page changed (on a
    refusal that hands back the live page, merge onto it and publish again until it goes
-   through), run `loaded`, and run `prep` again. Fix every problem it prints: a
+   through), run `loaded`, and run `prep` again. When it stops with "rows read N min ago",
+   read the rows and notes again into a new directory (the writes you sent are on the page) and
+   run `prep` on that. Fix every problem it prints: a
    blocked child gets a push to the owner at once, with its session link and the exact thing
    to approve; new waiting cards get one push naming them, then `pushed`.
 6. End the message with a horizontal rule and the footer line `prep` printed, as is.
