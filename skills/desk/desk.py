@@ -537,7 +537,8 @@ def image_files_problems(r):
 # What a session holds in its head: when a clone's HEAD changed one of these after it read
 # them, it must re-read before its next message (2026-10-25). The plugin's own clone counts
 # too: its skills, commands and page are rules, and a new page means the keeper republishes
-# its Desk. prep never fetches (2026-10-26): `update` pulls the plugin, and any pull counts.
+# its Desk. prep never waits on the network (2026-10-26): `update` pulls the plugin, and any
+# pull counts; prep only starts a detached fetch of the plugin's main (update_check).
 RULE_PATHS = ("CLAUDE.md", "memory/MEMORY.md", ".claude/skills", ".claude/desk.json",
               "skills", "page/desk.html")
 PAGE_PATH = "page/desk.html"
@@ -652,6 +653,60 @@ def pull_plugin(home, url=PLUGIN_URL):
     except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
         head = git(home, "rev-parse", "HEAD") if (home / ".git").exists() else None
         return head, head, [f"{home}: pull failed, judged on what's there ({e})"]
+
+
+# How often prep starts a background fetch of the plugin's main (2026-10-26).
+FETCH_HOURS = 6
+LOCAL_SECONDS = 5
+BACKGROUND = []  # the fetches started, held so they run on unwatched after prep returns
+
+
+def fetched_path(state_path):
+    """When each plugin clone was last fetched: next to the loaded commits."""
+    return Path(state_path).with_name("fetched.json")
+
+
+def start_fetch(clone):
+    """`git fetch origin main` in clone, detached and silent: prep never waits on it."""
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    return subprocess.Popen(["git", "-C", str(clone), "fetch", "--quiet", "origin", "main"],
+                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, env=env, start_new_session=True)
+
+
+def update_check(clone, state_path, now=None, hours=FETCH_HOURS):
+    """(ahead, fetch): ahead is (loaded, origin/main) when the last fetch of the plugin's main
+    brought rule changes past what was loaded, else None; fetch is the background fetch this
+    started (at most once every `hours`), else None. Never raises and never waits on the network."""
+    ahead, proc = None, None
+    try:
+        clone = Path(clone)
+        if not (clone / ".git").exists():
+            return None, None
+        key = str(clone.resolve())
+        try:
+            base = load_loaded(state_path).get(key) or git(clone, "rev-parse", "HEAD", timeout=LOCAL_SECONDS)
+            upstream = git(clone, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/main",
+                           timeout=LOCAL_SECONDS)
+            if upstream != base and git(clone, "rev-list", "--count", f"{base}..{upstream}",
+                                        timeout=LOCAL_SECONDS) != "0":
+                if git(clone, "diff", "--name-only", f"{base}...{upstream}", "--", *RULE_PATHS,
+                       timeout=LOCAL_SECONDS):
+                    ahead = (base, upstream)
+        except (RuntimeError, OSError, subprocess.TimeoutExpired):
+            pass
+        now = now or time.time()
+        fp = fetched_path(state_path)
+        stamps = load_loaded(fp)
+        last = stamps.get(key)
+        if not isinstance(last, (int, float)) or not 0 <= now - last < hours * 3600:
+            stamps[key] = now
+            fp.parent.mkdir(parents=True, exist_ok=True)
+            fp.write_text(json.dumps(stamps, indent=2) + "\n")
+            proc = start_fetch(clone)
+    except Exception:  # noqa: BLE001: a background check never stops a message
+        pass
+    return ahead, proc
 
 
 def print_stale(stale):
@@ -1266,6 +1321,14 @@ def cmd_prep(a):
             print(f"Then re-read each file above (load the changed skills again) and run: "
                   f"python3 {Path(__file__).name} loaded. (/desk:update does all of it.)")
             return 1
+        plugin = Path(a.plugin) if a.plugin else plugin_clone()
+        if plugin and (a.plugin or plugin.resolve() in {Path(r).resolve() for r in rule_repos(a.repo)}):
+            ahead, proc = update_check(plugin, a.state)
+            BACKGROUND.extend([proc] if proc else [])
+            if ahead:
+                print(f"Desk has an update ({ahead[0][:7]} -> {ahead[1][:7]} on the plugin's main): "
+                      f"run /desk:update now, then prep again.")
+                return 1
     late = stale_read(a.rows, a.max_age)
     if late:
         print(late)
@@ -1351,7 +1414,9 @@ def main(argv=None):
         if name == "prep":
             rules_args(s)
             s.add_argument("--no-rules", "--no-fetch-rules", dest="no_rules", action="store_true",
-                           help="skip the rule-reload check")
+                           help="skip the rule-reload and update checks")
+            s.add_argument("--plugin", help="the plugin's clone to check for updates in the background "
+                                            "(default: the plugin's clone, when it's among the watched)")
             s.add_argument("--max-age", type=float, default=READ_MINUTES,
                            help=f"refuse rows read longer ago than this, in minutes (default {READ_MINUTES})")
             s.add_argument("--message", help="the draft about to go out: flag its questions no Waiting card holds")

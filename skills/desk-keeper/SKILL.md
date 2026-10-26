@@ -41,14 +41,16 @@ owner may have cleared news since):
    refusal that hands back the live page, merge onto it and publish again until it goes
    through), run `loaded`, and run `prep` again. When it stops with "rows read N min ago",
    read the rows and notes again into a new directory (the writes you sent are on the page) and
-   run `prep` on that. Fix every problem it prints: a
+   run `prep` on that. When it stops with "Desk has an update", run `/desk:update` at once
+   (don't ask the owner), then `prep` again. Fix every problem it prints: a
    blocked child gets a push to the owner at once, with its session link and the exact thing
    to approve; new waiting cards get one push naming them, then `pushed`.
 6. End the message with a horizontal rule and the footer line `prep` printed, as is.
 
 ## New Desk rules
 
-When the Desk orchestrator says a fix merged, run `/desk:update` (the `update` skill) at once.
+When the Desk orchestrator says a fix merged, or `prep` says Desk has an update, run
+`/desk:update` (the `update` skill) at once, without asking the owner.
 
 ## Sessions
 
