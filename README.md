@@ -58,6 +58,6 @@ for t in page/tests/{news,deps,desk}.mjs; do NODE_PATH=$(npm root -g) node $t; d
 ## Feedback
 
 `/desk:feedback` in any session drafts an issue here that describes behavior only, never a
-Desk's content, and shows it to you before it's filed. A new issue starts a fixer session.
+Desk's content, and shows it to you before anything goes public, then gives you a prefilled link to submit yourself. A new issue starts a fixer session.
 
 MIT licensed.

@@ -21,11 +21,10 @@ is on the Desk (rule 17). Projects can be an employer's: nothing of theirs leave
 3. **Scrub it:** `python3 <the desk skill's directory>/desk.py scrub <scratch>/feedback.md
    --rows <a fresh rows dump, when you can read the Desk>`. Rewrite every flag away.
 4. **Show the owner the draft** and wait for their yes. Nothing goes public before it.
-5. **File it:**
-   - with GitHub access to `bagrat/claude-plugin-desk` (a personal session): create the issue
-     there, labelled `feedback`;
-   - otherwise (e.g. a work account): `desk.py issue-url --title "…" --body
-     <scratch>/feedback.md --rows <dump>` and give the owner the link to open and submit
-     from their own GitHub.
-6. One line back: the issue's link (or that the link is ready). Opening it starts a fixer, and
+5. **Hand over the link, never file it yourself.** An issue opened through a session's GitHub
+   access doesn't start the fixer (the routine skips events made by its own app), so even with
+   access to `bagrat/claude-plugin-desk` you do not create the issue. Run `desk.py issue-url
+   --title "…" --body <scratch>/feedback.md --rows <dump>` and give the owner the link to open
+   and submit from their own GitHub.
+6. One line back: the prefilled link. Submitting it starts a fixer, and
    the Desk orchestrator tells every keeper when the fix is in.
