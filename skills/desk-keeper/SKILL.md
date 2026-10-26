@@ -49,6 +49,9 @@ Every time, in this order:
   `extra_allowed_tools`, or its reports arrive held.
 - **Only you push the owner.** A child pushes them only when it absolutely needs them and
   can't go through you.
+- **Times in the owner's zone** (`desk.json`'s `timezone`), on cards, in pushes and in the
+  chat: `desk.py when` turns "tomorrow 9:00" into the stored UTC and a stored time back. No
+  `timezone` yet: ask the owner for theirs, add it, commit, and republish the page.
 - **Their answers relayed**: quote their exact words and where they said them; an answer
   settles only the question asked.
 

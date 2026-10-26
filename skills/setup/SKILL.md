@@ -14,9 +14,10 @@ put two projects on one Desk.
 
 1. **Ask what's missing**, one question at a time, each with your recommendation: the title
    ("<project> Desk"), the theme (`desk.py look --list`), the icon (an emoji, a letter or an
-   image). Who keeps it: this session, unless the owner names another.
+   image), their time zone (an IANA name like `Europe/Berlin`; recommend the one their messages
+   or the repo point to, else ask). Who keeps it: this session, unless the owner names another.
 2. **Write `.claude/desk.json`** in the project's repo: `{"title", "keeper": "<this session's
-   id>", "look": {"theme", "icon"}}` (no `page` yet). Commit it as the repo does.
+   id>", "timezone", "look": {"theme", "icon"}}` (no `page` yet). Commit it as the repo does.
 3. **The page:** `python3 <the desk skill's directory>/desk.py page --out <scratch>/desk.html`
    and publish it with the Artifact tool, `capabilities: {db: {}, user: {}, assets: {},
    comments: {}}`, `icon: "inbox"`. **Moving an existing page in place:** publish to its `url`

@@ -245,8 +245,10 @@ footer { margin-top: 28px; font-size: 13px; color: var(--quiet); max-width: 65ch
 </div>
 
 <script>
-// This Desk, filled in when the page is made for it (desk.py page): its keeper's session.
+// This Desk, filled in when the page is made for it (desk.py page): its keeper's session, and
+// the owner's time zone (times show in it, whatever the browser's; none: the browser's).
 const KEEPER = "{{DESK_KEEPER}}";
+const TZ = "{{DESK_TIMEZONE}}" || undefined;
 const DESK_LOOK = { theme: "{{DESK_THEME}}", icon: {{DESK_ICON}} };
 // Icons (Lucide's shapes, picked 2026-10-24): tabs and the answer buttons.
 const ICON = {
@@ -292,8 +294,14 @@ function block(text) {
   }
   return frag;
 }
-const day = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleDateString(undefined, { month: "short", day: "numeric" }); };
-const when = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); };
+const day = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleDateString(undefined, { timeZone: TZ, month: "short", day: "numeric" }); };
+const when = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleString(undefined, { timeZone: TZ, weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); };
+// The wall clock in the owner's zone, as [y, m, d, h, min], and the moment a wall time there is.
+const wall = (d) => new Intl.DateTimeFormat("en-US", { timeZone: TZ, hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric" })
+  .formatToParts(d).reduce((w, p) => { const i = ["year", "month", "day", "hour", "minute"].indexOf(p.type); if (i >= 0) w[i] = +p.value; return w; }, []);
+const atWall = (y, m, d, h, min) => { let t = Date.UTC(y, m - 1, d, h, min);
+  for (let i = 0; i < 2; i++) { const [Y, M, D, H, N] = wall(new Date(t)); t -= Date.UTC(Y, M - 1, D, H, N) - Date.UTC(y, m - 1, d, h, min); }
+  return new Date(t); };
 
 function toast(msg, undo) {
   document.querySelectorAll(".toast").forEach((t) => t.remove()); const t = el("div", "toast", msg); t.setAttribute("role", "status");
@@ -400,7 +408,7 @@ const SENT = {
 const notes = {}, drafts = {};
 const say = (id, m) => { notes[id] = m; const n = $("st-" + id); if (n) n.textContent = m; };
 const nameOf = (id, t) => t.handle || t.title || id;
-function tomorrow9() { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); return d.toISOString(); }
+function tomorrow9() { const [y, m, d] = wall(new Date()); return atWall(y, m, d + 1, 9, 0).toISOString(); }
 
 // An answer unblocks the task: it moves to In progress, and the keeper brings it back
 // to Waiting if it needs you again. Later only hides it until 9:00.
@@ -820,8 +828,8 @@ function drawWaiting(slid) {
   list.replaceChildren(...(owner ? [stage, dock] : [stage]));
   markSeen(id, t);
 }
-const sinceShort = (iso) => { const d = new Date(iso); if (isNaN(d)) return ""; const today = new Date().toDateString() === d.toDateString();
-  return today ? d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : d.toLocaleDateString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" }); };
+const sinceShort = (iso) => { const d = new Date(iso); if (isNaN(d)) return ""; const today = wall(new Date()).slice(0, 3).join() === wall(d).slice(0, 3).join();
+  return today ? d.toLocaleTimeString(undefined, { timeZone: TZ, hour: "2-digit", minute: "2-digit" }) : d.toLocaleDateString(undefined, { timeZone: TZ, weekday: "short", hour: "2-digit", minute: "2-digit" }); };
 // Where you are, as a row of dashes: one per item, the current one lit, a new or changed one
 // marked at its left end. Tap a dash to go there. Items put off till tomorrow sit after it as
 // ⏭ and a number; tap to show or hide them.

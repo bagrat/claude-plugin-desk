@@ -15,10 +15,13 @@ Which Desk you're on comes from the project's `.claude/desk.json`:
 
 ```json
 {"title": "shroom Desk", "page": "https://claude.ai/artifact/…", "keeper": "session_…",
- "watch": ["/home/user/other-clone"], "look": {"theme": "frost", "icon": {"emoji": "🍄"}}}
+ "timezone": "Europe/Berlin", "watch": ["/home/user/other-clone"], "look": {"theme": "frost", "icon": {"emoji": "🍄"}}}
 ```
 
-`page` is the Desk's link; `keeper` the session that keeps it; `watch` other clones whose rules
+`page` is the Desk's link; `keeper` the session that keeps it; `timezone` the owner's (an IANA
+name): every time on a card, in a push or in the keeper's chat is written in it, with its
+abbreviation ("Tue 27 Oct 09:00 CET"), and the page shows times in it (`when` converts both
+ways; without one, `prep` warns and times read as UTC); `watch` other clones whose rules
 the keeper must reload when they change; `look` what the page is made with (the live look is
 the page's `settings/look` row, rule 16). Only the keeper writes its cards (rule 11).
 
@@ -58,7 +61,8 @@ directory; `--desk FILE` (before the command) or `$DESK_CONFIG` names another.
 | `python3 $S sorted $R <note-id> […]` | The deletes for notes now held by cards. |
 | `python3 $S note --text "…" --from <where> --out DIR [--image ID=caption]` | A note for this Desk's Inbox (what `/desk:note` runs). |
 | `python3 $S look [--theme T] [--emoji E \| --image ASSET \| --letter L] [--current row.json] [--list]` | The `settings/look` row (rule 16). |
-| `python3 $S page --out FILE` | The page to publish for this Desk: the template with its title, keeper and look. |
+| `python3 $S when "tomorrow 9:00"\|"today 17:30"\|"2026-11-02 9:00"\|ISO` | A time in the owner's zone: their words to the UTC ISO a row stores (`snoozeUntil`, `when`), or a stored ISO as they read it. |
+| `python3 $S page --out FILE` | The page to publish for this Desk: the template with its title, keeper, time zone and look. |
 | `python3 $S scrub DRAFT [--rows $R]` | What in a feedback draft might carry the Desk's content (rule 17). |
 | `python3 $S issue-url --title T --body FILE [--rows $R]` | A prefilled new-issue link on the plugin's repo; refuses while `scrub` flags anything. |
 
@@ -129,7 +133,7 @@ it.
    its recap (`move … news --context …`). Anything to try by hand stays a Waiting card (kind
    `check`). Otherwise the card closes on their answer (`move … done`).
 10. **The buttons.** On a Waiting card: 👍 go with the recommended (to In progress), ⏭ back
-    tomorrow at 9:00, 💬 say it in the chat. On news, one button, **Seen**, which deletes the row
+    tomorrow at 9:00 in the owner's zone, 💬 say it in the chat. On news, one button, **Seen**, which deletes the row
     (where it can't, it sets `done` and you delete it); it wakes no one.
 11. **One writer.** Only the keeper writes cards; other sessions report to it. The one write
     anyone else makes is a note into the Inbox (rule 15).

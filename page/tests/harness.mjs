@@ -4,8 +4,8 @@
 import { createRequire } from 'module'; import fs from 'fs';
 const { chromium } = createRequire(import.meta.url)('playwright');
 const tpl = fs.readFileSync(new URL('../desk.html', import.meta.url), 'utf8');
-export const render = ({ title = 'Test Desk', theme = 'frost', keeper = '', icon = {} } = {}) =>
-  tpl.replaceAll('{{DESK_TITLE}}', title).replaceAll('{{DESK_THEME}}', theme).replaceAll('{{DESK_KEEPER}}', keeper).replaceAll('{{DESK_ICON}}', JSON.stringify(icon));
+export const render = ({ title = 'Test Desk', theme = 'frost', keeper = '', icon = {}, timezone = '' } = {}) =>
+  tpl.replaceAll('{{DESK_TIMEZONE}}', timezone).replaceAll('{{DESK_TITLE}}', title).replaceAll('{{DESK_THEME}}', theme).replaceAll('{{DESK_KEEPER}}', keeper).replaceAll('{{DESK_ICON}}', JSON.stringify(icon));
 const exe = fs.existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined;
 export const browser = () => chromium.launch(exe ? { executablePath: exe } : {});
 let fails = 0;
@@ -13,8 +13,8 @@ export const ok = (cond, what) => { console.log((cond ? 'ok   ' : 'FAIL ') + wha
 export const done = async (b) => { await b.close(); console.log(fails ? `${fails} failed` : 'all passed'); process.exit(fails ? 1 : 0); };
 
 // db: {collection: {id: row}}; the page's writes land in window.__log and in the store.
-export async function open(b, { db = {}, scheme = 'dark', hash = '', canDelete = true, width = 402, page = {}, owner = true, assets = true } = {}) {
-  const ctx = await b.newContext({ viewport: { width, height: 874 }, deviceScaleFactor: 2, colorScheme: scheme, hasTouch: true, isMobile: width < 500 });
+export async function open(b, { db = {}, scheme = 'dark', hash = '', canDelete = true, width = 402, page = {}, owner = true, assets = true, zone } = {}) {
+  const ctx = await b.newContext({ ...(zone ? { timezoneId: zone } : {}), viewport: { width, height: 874 }, deviceScaleFactor: 2, colorScheme: scheme, hasTouch: true, isMobile: width < 500 });
   const p = await ctx.newPage();
   const errs = []; p.on('pageerror', (e) => errs.push(String(e)));
   await p.addInitScript(({ db, canDelete, owner, assets }) => {

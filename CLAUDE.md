@@ -13,7 +13,7 @@ Examples in tests and docs are made up.
   link there too.
 - **Rules are public paraphrase.** A rule's date may be given; never quote a project's chat.
 - **The page template** keeps the placeholders `{{DESK_TITLE}}`, `{{DESK_THEME}}`,
-  `{{DESK_KEEPER}}`, `{{DESK_ICON}}`; `desk.py page` fills them. Its `THEMES` and desk.py's
+  `{{DESK_KEEPER}}`, `{{DESK_ICON}}`, `{{DESK_TIMEZONE}}`; `desk.py page` fills them. Its `THEMES` and desk.py's
   `THEMES` stay equal (a test checks).
 
 ## The Desk orchestrator
