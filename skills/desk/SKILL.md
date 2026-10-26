@@ -50,7 +50,7 @@ directory; `--desk FILE` (before the command) or `$DESK_CONFIG` names another.
 | `python3 $S check $R [--sessions …] [--stale-hours 12]` | The checks alone. |
 | `python3 $S footer $R` | The footer line, exactly; refuses a dump older than 2 minutes, like `prep`. |
 | `python3 $S order $R` | News, then the waiting deck as the page shows it, then Later and In progress. |
-| `python3 $S rank $R` | Re-rank waiting cards by rule 7. |
+| `python3 $S rank $R` | Re-rank waiting cards by rule 7, and number the ones without a `num`. |
 | `python3 $S move $R <id> news\|working\|waiting\|held\|done [--context …] [--ask … --recommend … --ifnone …] [--kind K] [--link "Label=url"] [--note …] [--settled "…"] [--session "Label=url"] [--active] [--if-version N]` | The patch for a move. |
 | `python3 $S pushed $R <id> […]` | After the push for new waiting cards (rule 13): sets each card's `pushedAt`. |
 | `python3 $S dep $R <id> "<item>" done\|building\|open [--card ID] [--add]` | One `dependsOn` item by hand. |
@@ -74,14 +74,15 @@ What the script does by itself:
   gets its push) and, unless you give `--note`, `note`. It refuses without an ask and a
   recommendation (a `step` needs no recommendation but its `--link`), and without a new `--ask`
   when the old one was answered. `--kind` sets the kind; `--link` puts a link first in `links`. `--settled` puts a
-  "Settled so far" fold at the top.
+  "Settled so far" fold at the top. A card waiting for the first time gets its `num` (rule 1's
+  number); one that has it keeps it.
 - `move … held` keeps the card waiting but holds it under Later until the owner asks for it
   (`heldAt`): out of the deck, the footer's count and the ranks, no push, never flagged for
   its age. It refuses without an ask and a recommendation, like `waiting`. `move … waiting`
   brings it back: it drops `heldAt`, sets `activeAt` and `pushedAt` (they asked; no push is
   due). Any other move drops the hold.
 - `move … working` sets `workingSince`; `--session` adds a session first in `sessions`.
-- `move … news` drops the ask, recommendation, answers and what only a deck card uses, keeps
+- `move … news` drops the ask, recommendation, answers, `num` and what only a deck card uses, keeps
   the folds and images, and refuses an `--ask`.
 - `move … done` prints a delete. Every move also prints the cards whose `dependsOn` links the
   moved one, each set to its new state; send them together in one `batch`.
@@ -128,6 +129,12 @@ it.
    current step. **Every question put to them in the chat lands on a card in the same turn**,
    as a Waiting card's ask: never in an In-progress or Later card's `note`, `context` or folds
    (`check` flags those; `prep --message <draft>` flags a question in the draft no card holds).
+   In the chat, name a Waiting card by its number, "#3: …" (2026-10-26): the owner often
+   answers by voice, and a card's place in the deck shifts as cards come and re-rank, so "2"
+   is ambiguous; "#3" isn't. `desk.py` gives each card its `num` the first time it waits
+   (`move`, or `rank` for one without), one past every live card's, and the card keeps it
+   while it lives; the page and `prep`'s deck show it. When the owner says a bare number,
+   read it as `#N`.
 2. **One card per task.** Before adding or changing a card, read every waiting and in-progress
    card. A new question about a task goes into its card, never a second card. A card a newer
    step makes pointless is reworked or deleted. A card that waits on others lists them in
@@ -173,7 +180,7 @@ it.
     whose oldest row or note was written more than 2 minutes ago ("rows read N min ago").
 13. **A push for every new waiting card.** As soon as a card lands in Waiting (new, a new
     question, or back from a snooze), push the owner in the same turn: one push for all the new
-    ones, each named by its title, the most urgent first. Then `pushed`.
+    ones, each named by its number and title ("#3: …"), the most urgent first. Then `pushed`.
 14. **News.** What the owner should know but needn't answer: a release published, something they
     asked for merged, a decision live, a session finished with nothing left, a failure fixed, a
     scheduled job's result worth seeing. Never routine progress. Added in the same turn the
@@ -206,7 +213,7 @@ that watch. On a wake: read the thread, act, reply in one line, resolve it, upda
 ## Row fields
 
 **tasks**: state (news | waiting | working | scheduled; `done` only from the page), rank,
-rankByHand, kind (decide | review | check | do | step | info; `step`: rule 10), handle, title, context, details
+rankByHand, num (the card's number, "#3", given once by `desk.py`), kind (decide | review | check | do | step | info; `step`: rule 10), handle, title, context, details
 `[{title, text, images?}]`, images `[{id, caption, file?}]` (served at `/_blob/<id>`), ask,
 recommend, ifNone, blocks, links `[{label, url}]`, sessions `[{label, url}]`, since, updatedAt,
 activeAt, snoozeUntil, heldAt, pushedAt, answer, answeredAt, quick, quickAt, answerSent, workingSince,

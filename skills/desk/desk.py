@@ -47,7 +47,7 @@ DEP_STATES = ("done", "building", "open")
 DEP_OF_STATE = {"working": "building", "waiting": "open", "held": "open", "scheduled": "open", "done": "done", "news": "done"}
 # Rule 14: a news row is something to know, never something to answer.
 NEWS_DROPS = ("ask", "recommend", "ifNone") + ANSWER_FIELDS + ("workingSince", "snoozeUntil", "heldAt", "pushedAt", "activeAt",
-                                                              "rank", "rankByHand", "blocks", "kind", "note")
+                                                              "rank", "rankByHand", "blocks", "kind", "note", "num")
 # Rule 7: blocking or time-sensitive first, then reviews, then decisions, then checks by hand.
 KIND_ORDER = {"review": 0, "decide": 1, "step": 2, "do": 2, "check": 3, "info": 4, "close": 5}
 ACTIVE_HOURS = 3
@@ -272,6 +272,18 @@ def ordered(rows, now):
     return sorted(shown, key=key)
 
 
+def next_num(rows):
+    """A Waiting card's number: one past every live card's, so none is reused while its card lives."""
+    nums = [r.get("num") for r in rows if isinstance(r.get("num"), int)]
+    return max(nums, default=0) + 1
+
+
+def numbered(rows):
+    """{id: num} for the waiting cards that have none yet, the deck's order first."""
+    missing = [r for r in sorted(by_state(rows, "waiting"), key=rank_key) if not isinstance(r.get("num"), int)]
+    return {r.id: n for n, r in enumerate(missing, next_num(rows))}
+
+
 def rank_key(r):
     # Rule 7: blocking first, then by kind; the old rank breaks ties, so order holds.
     return (0 if r.get("blocks") else 1, KIND_ORDER.get(r.get("kind"), 9), rank_of(r))
@@ -393,6 +405,8 @@ def check(rows, now, sessions=None, stale_hours=12):
             for k in ("ask",) if kind == "step" else ("ask", "recommend"):
                 if not str(r.get(k) or "").strip():
                     say(r, f"waiting with no {k} (rule 3)")
+            if not isinstance(r.get("num"), int):
+                say(r, "waiting with no number: `rank` gives it one (the owner answers by “#N”)")
             if kind == "step" and not step_link(r.data):
                 say(r, "a step off the page (kind step) with no link: put it first in links, "
                        f"move {r.id} waiting --link 'Label=https://…' (rule 10)")
@@ -439,6 +453,16 @@ def check(rows, now, sessions=None, stale_hours=12):
             out.extend((r.id, m) for m in image_files_problems(r))
             if st != "news":
                 out.extend((r.id, m) for m in deps_problems(r, rows))
+
+    # A number names one card (the owner answers by it).
+    seen = {}
+    for r in rows:
+        n = r.get("num")
+        if isinstance(n, int) and r.get("state") != "news":
+            if n in seen:
+                say(r, f"#{n} is {seen[n]}'s number too: give one of them a new one (`rank` after dropping it)")
+            else:
+                seen[n] = r.id
 
     # One card per task (rule 2), and a wrap-up only once nothing else is open on it (rule 9).
     for i, a in enumerate(open_rows):
@@ -855,7 +879,7 @@ def step_link(d):
 
 
 def move(row, to, now, note=None, ask=None, recommend=None, ifnone=None, settled=None,
-         session=None, active=False, context=None, kind=None, link=None):
+         session=None, active=False, context=None, kind=None, link=None, rows=()):
     """The patch for a move (rules 1, 5, 9, 14). None for done: the row is deleted. `held` is a
     waiting card held until the owner asks for it (rule 10)."""
     if to == "done":
@@ -925,6 +949,8 @@ def move(row, to, now, note=None, ask=None, recommend=None, ifnone=None, settled
             raise ValueError("a step off the page (kind step) needs its link: --link 'Label=https://…' (rule 10)")
         if d.get("answer") and ask is None:
             raise ValueError("its ask was answered: give the new question with --ask (rules 1, 5)")
+        if not isinstance(d.get("num"), int):
+            patch["num"] = next_num(list(rows) + [row])
     if settled is not None:
         patch["details"] = settled_fold(d.get("details"), settled)
     return patch
@@ -1326,7 +1352,8 @@ def describe(r):
     bits = [r.get("kind") or "?"]
     if r.get("blocks"):
         bits.append("blocks " + r.get("blocks"))
-    return f"{r.get('handle') or r.id} [{', '.join(bits)}] {r.get('title', '')}"
+    num = f"#{r.get('num')} " if isinstance(r.get("num"), int) else ""
+    return f"{num}{r.get('handle') or r.id} [{', '.join(bits)}] {r.get('title', '')}"
 
 
 def cmd_order(a):
@@ -1365,11 +1392,15 @@ def cmd_sessions(a):
 
 def cmd_rank(a):
     rows = load_rows(a.rows)
-    entries = []
-    for rid, rank in reranked(rows).items():
-        r = find(rows, rid)
-        if r.get("rank") != rank:
-            entries.append(write_patch(a.rows, r, {"rank": rank}, None, a.out))
+    entries, ranks, nums = [], reranked(rows), numbered(rows)
+    for rid in list(ranks) + [i for i in nums if i not in ranks]:
+        r, patch = find(rows, rid), {}
+        if rid in ranks and r.get("rank") != ranks[rid]:
+            patch["rank"] = ranks[rid]
+        if rid in nums:
+            patch["num"] = nums[rid]
+        if patch:
+            entries.append(write_patch(a.rows, r, patch, None, a.out))
     print(json.dumps(entries, indent=2))
     return 0
 
@@ -1379,7 +1410,7 @@ def cmd_move(a):
     r = find(rows, a.id)
     try:
         patch = move(r, a.to, now, a.note, a.ask, a.recommend, a.ifnone, a.settled, a.session, a.active, a.context,
-                     a.kind, a.link)
+                     a.kind, a.link, rows)
     except ValueError as e:
         print(f"refused: {e}", file=sys.stderr)
         return 2

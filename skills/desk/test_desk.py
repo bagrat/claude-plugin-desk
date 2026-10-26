@@ -1,6 +1,7 @@
 """Tests for desk.py. Run: python3 -m unittest discover -s skills/desk (or pytest)."""
 
 import io
+import itertools
 import os
 import json
 import re
@@ -23,9 +24,12 @@ S1 = "https://claude.ai/code/session_01AAAA"
 S2 = "https://claude.ai/code/session_01BBBB"
 
 
+NUMS = itertools.count(1)
+
+
 def waiting(**kw):
     row = {"state": "waiting", "kind": "decide", "title": "T", "ask": "Which?", "recommend": "This one.",
-           "pushedAt": "2026-10-25T11:00:00Z"}
+           "pushedAt": "2026-10-25T11:00:00Z", "num": next(NUMS)}
     row.update(kw)
     return row
 
@@ -383,6 +387,59 @@ class Move(Base):
         code, out, _ = self.run_cli("move", self.dir, "a", "done")
         self.assertEqual(json.loads(out), [{"op": "delete", "collection": "tasks", "doc_id": "a", "if_version": 9}])
         self.assertFalse((self.dir / "a.json").exists())
+
+
+class Numbers(Base):
+    """A Waiting card's number: given once, kept while the card lives, so "#3" always names it."""
+
+    def test_move_to_waiting_gives_the_next_number(self):
+        self.put("a", waiting(num=4))
+        self.put("b", working(num=7))
+        self.put("c", working())
+        code, out, err = self.run_cli("move", self.dir, "c", "waiting", "--now", NOW, "--ask", "Q?", "--recommend", "R.")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(Path(json.loads(out)[0]["file_path"]).read_text())["num"], 8)
+        self.assertEqual(self.row("c")["num"], 8)
+
+    def test_number_stays_through_moves(self):
+        self.put("a", waiting(num=3))
+        self.put("b", waiting(num=9))
+        _, out, _ = self.run_cli("move", self.dir, "a", "working", "--now", NOW, "--note", "x")
+        self.assertNotIn("num", json.loads(Path(json.loads(out)[0]["file_path"]).read_text()))
+        _, out, _ = self.run_cli("move", self.dir, "a", "waiting", "--now", NOW, "--ask", "New?", "--recommend", "R.")
+        self.assertNotIn("num", json.loads(Path(json.loads(out)[0]["file_path"]).read_text()))
+        self.assertEqual(self.row("a")["num"], 3)
+
+    def test_held_card_gets_a_number_too(self):
+        self.put("a", waiting(num=2))
+        self.put("b", working())
+        _, out, err = self.run_cli("move", self.dir, "b", "held", "--now", NOW, "--ask", "Q?", "--recommend", "R.")
+        self.assertEqual(self.row("b")["num"], 3, err)
+
+    def test_news_drops_the_number(self):
+        self.put("a", waiting(num=3))
+        _, out, _ = self.run_cli("move", self.dir, "a", "news", "--now", NOW)
+        self.assertEqual(json.loads(Path(json.loads(out)[0]["file_path"]).read_text())["num"], {"__delete__": True})
+
+    def test_rank_numbers_waiting_cards_without_one(self):
+        self.put("a", waiting(num=2, rank=2))
+        old = waiting(rank=1); old.pop("num")
+        self.put("b", old)
+        self.assertIn("rank", " ".join(self.msgs("b")))
+        code, out, _ = self.run_cli("rank", self.dir)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.row("b")["num"], 3)
+        self.assertEqual(self.msgs("b"), [])
+
+    def test_two_cards_one_number_is_flagged(self):
+        self.put("a", waiting(num=5))
+        self.put("b", working(num=5))
+        self.assertTrue(any("#5" in m for m in self.msgs("b")))
+
+    def test_order_names_cards_by_number(self):
+        self.put("a", waiting(num=12, handle="ship-date", title="Pick the ship date"))
+        _, out, _ = self.run_cli("order", self.dir, "--now", NOW)
+        self.assertIn("1. #12 ship-date", out)
 
 
 class Steps(Base):
