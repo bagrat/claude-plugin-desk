@@ -100,7 +100,7 @@ details.task > summary::-webkit-details-marker { display: none; }
 .t-title { font-weight: 600; font-size: 17px; line-height: 1.3; text-wrap: balance; }
 .meta { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: 13px; color: var(--quiet); }
 .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--chip-bg); }
-.k-decide { color: var(--decide); } .k-review { color: var(--review); } .k-check { color: var(--check); } .k-do { color: var(--do); } .k-info { color: var(--quiet); }
+.k-decide { color: var(--decide); } .k-review { color: var(--review); } .k-check { color: var(--check); } .k-do, .k-step { color: var(--do); } .k-info { color: var(--quiet); }
 .badge { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--new); border: 1px solid currentColor; }
 .badge.ok { color: var(--ok); }
 .say { font-style: italic; }
@@ -113,6 +113,7 @@ details.task > summary::-webkit-details-marker { display: none; }
 .links { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 14px; }
 .quick { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .quick .go { grid-column: 1 / -1; }
+.btn.step { justify-self: start; max-width: 100%; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .answered { padding: 8px 12px; border-left: 3px solid var(--ok); background: var(--chip-bg); border-radius: 0 10px 10px 0; font-size: 14px; }
 .more > summary { cursor: pointer; color: var(--accent); font-size: 14px; font-weight: 600; min-height: 32px; display: flex; align-items: center; }
@@ -265,7 +266,7 @@ const ICON = {
 };
 const icon = (k) => { const t = document.createElement("template"); t.innerHTML = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true">' + ICON[k] + "</svg>"; return t.content.firstChild; };
 const iconBtn = (cls, k, label, text) => { const b = btn(cls); b.append(icon(k)); if (text) b.append(text); b.setAttribute("aria-label", label); b.title = label; return b; };
-const KIND = { decide: "Decide", review: "Review", check: "Check by hand", do: "Do", info: "For you to know", close: "Call it done?" };
+const KIND = { decide: "Decide", review: "Review", check: "Check by hand", do: "Do", step: "Your step", info: "For you to know", close: "Call it done?" };
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
 const btn = (cls, text) => { const b = el("button", cls, text); b.type = "button"; return b; };
@@ -314,6 +315,8 @@ function linkRow(items) {
   for (const l of items || []) { const href = safeUrl(l.url); if (!href) continue; box.append(linkTo(el("a", null, l.label || href), href)); }
   return box.childElementCount ? box : null;
 }
+// A step only the owner can do off the page (kind step): its first link is what they do.
+const stepLink = (t) => t.kind === "step" && safeUrl(t.links?.[0]?.url) ? t.links[0] : null;
 function field(label, node) { const f = el("div", "field"); f.append(el("span", "lbl", label), node); return f; }
 
 // Links out: plain links, which the claude.ai viewer opens itself. A script-opened tab is
@@ -447,11 +450,13 @@ function mic(id, t) {
   setTimeout(() => f.remove(), 4000);
 }
 function quickButtons(id, t, labelled) {
-  const go = iconBtn("btn go", "go", t.recommend ? "Go with the recommended" : "Go", labelled && (t.recommend ? "Go with the recommended" : "Go"));
+  // On a step, 👍 says it's done, not "go": the owner does it off the page first.
+  const step = !!stepLink(t), goLabel = step ? "Done" : t.recommend ? "Go with the recommended" : "Go";
+  const go = iconBtn("btn go", "go", goLabel, labelled && goLabel);
   const later = iconBtn("btn later", "later", "Later: back tomorrow at 9:00", labelled && "Later");
   const say = iconBtn("btn", "mic", "Say it in the chat", labelled && "Say it in the chat");
   const card = () => go.closest(".card, details.task") || $("t-" + id);
-  go.onclick = () => { const n = nextAfter(id); answer(id, t, "go", t.recommend ? "Go with the recommended: " + t.recommend : "Go.", card()).then((ok) => ok && advance(n)); };
+  go.onclick = () => { const n = nextAfter(id); answer(id, t, step ? "done" : "go", step ? "Done." : t.recommend ? "Go with the recommended: " + t.recommend : "Go.", card()).then((ok) => ok && advance(n)); };
   later.onclick = () => { const n = nextAfter(id); answer(id, t, "later", "", card()).then((ok) => ok && advance(n)); };
   say.onclick = () => mic(id, t);
   return { go, later, say };
@@ -596,12 +601,13 @@ function body(id, t, docked) {
   const deps = depList(t.dependsOn); if (deps) b.append(field("Waiting on", deps));
   folds(id, t, b);
   const shots = gallery(t.images); if (shots) b.append(field("The boards (tap to enlarge)", shots));
-  if (t.ask) b.append(field("The ask", inline(el("div", "ask"), t.ask)));
+  if (t.ask) b.append(field(stepLink(t) ? "Your step" : "The ask", inline(el("div", "ask"), t.ask)));
+  const sl = stepLink(t); if (sl) b.append(linkTo(el("a", "btn primary step", sl.label || "Open"), safeUrl(sl.url)));
   if (t.recommend) b.append(field("Recommended", inline(el("p"), t.recommend)));
   if (t.ifNone) b.append(field("If you have no preference", inline(el("p"), t.ifNone)));
   if (t.answer) { const p = el("div", "answered"); p.append(el("b", null, "Your answer" + (t.answeredAt ? ", " + when(t.answeredAt) : "") + ": "), t.answer); b.append(p); }
   if (db && isOwner && !docked && t.state === "waiting") { b.append(quickRow(id, t)); b.append(Object.assign(el("span", "sent", notes[id] || ""), { id: "st-" + id })); }
-  const links = linkRow(t.links); if (links) b.append(field("Links", links));
+  const links = linkRow(stepLink(t) ? t.links.slice(1) : t.links); if (links) b.append(field("Links", links));
   const sess = linkRow(t.sessions); if (sess) b.append(field("Sessions", sess));
   const more = el("details", "more"); more.append(el("summary", null, "More: type an answer, copy, mark done"));
   more.open = !!ui.moreOpen[id]; more.addEventListener("toggle", () => { ui.moreOpen[id] = more.open; });
