@@ -165,8 +165,8 @@ it.
 17. **Feedback on Desk itself.** A fix or a feature for the Desk (not for the project) goes to
     the plugin's repo as an issue that describes **behavior only**: no card text, titles, names,
     links, repos or note text; placeholders ("a waiting card with two folds") instead. Draft it,
-    `scrub` it, show the owner the draft, and only then file it (or hand them `issue-url`'s link
-    to submit from their own GitHub). `/desk:feedback` does this.
+    `scrub` it, show the owner the draft, and only then hand them `issue-url`'s link to submit
+    from their own GitHub; never file it from a session. `/desk:feedback` does this.
 
 ## How it reaches you
 
