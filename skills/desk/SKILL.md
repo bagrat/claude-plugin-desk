@@ -47,10 +47,11 @@ directory; `--desk FILE` (before the command) or `$DESK_CONFIG` names another.
 | Command | What |
 | --- | --- |
 | `python3 $S sessions $R` | The sessions behind open cards, one per line, to check one by one (`get_session`). |
-| `python3 $S prep $R --sessions sessions.json` | **Before every message.** The rule-reload check, the checks, the notes to sort, the deck in the page's order, the footer. Exit 1 when anything is left to do. |
-| `python3 $S loaded` | Mark the rules reloaded, after you've pulled and re-read what `prep` named. |
+| `python3 $S prep $R --sessions sessions.json [--message draft.md]` | **Before every message.** The rule-reload check, the checks, the notes to sort, the deck in the page's order, the footer. With `--message`, each numbered question or "Recommended:" line in the draft that no Waiting card holds. Exit 1 when anything is left to do. Refuses rows read more than 2 minutes ago (`--max-age MIN`). |
+| `python3 $S loaded` | Mark the rules reloaded, after you've re-read what `prep` or `update` named. |
+| `python3 $S update` | `/desk:update`: pull the plugin's clone at `~/.claude/desk` (clone it if missing) and name what changed since you loaded it. Exit 1 when there's something to re-read. |
 | `python3 $S check $R [--sessions …] [--stale-hours 12]` | The checks alone. |
-| `python3 $S footer $R` | The footer line, exactly. |
+| `python3 $S footer $R` | The footer line, exactly; refuses a dump older than 2 minutes, like `prep`. |
 | `python3 $S order $R` | News, then the waiting deck as the page shows it, then Later and In progress. |
 | `python3 $S rank $R` | Re-rank waiting cards by rule 7. |
 | `python3 $S move $R <id> news\|working\|waiting\|done [--context …] [--ask … --recommend … --ifnone …] [--note …] [--settled "…"] [--session "Label=url"] [--active] [--if-version N]` | The patch for a move. |
@@ -62,6 +63,8 @@ directory; `--desk FILE` (before the command) or `$DESK_CONFIG` names another.
 | `python3 $S note --text "…" --from <where> --out DIR [--image ID=caption]` | A note for this Desk's Inbox (what `/desk:note` runs). |
 | `python3 $S look [--theme T] [--emoji E \| --image ASSET \| --letter L] [--current row.json] [--list]` | The `settings/look` row (rule 16). |
 | `python3 $S when "tomorrow 9:00"\|"today 17:30"\|"2026-11-02 9:00"\|ISO` | A time in the owner's zone: their words to the UTC ISO a row stores (`snoozeUntil`, `when`), or a stored ISO as they read it. |
+| `python3 $S backup $R --out FILE [--private-repo]` | Before a handoff: the cards, notes and look as read, in one JSON file with a timestamp. Refuses a file inside a git repo (a project's repo may be public) unless `--private-repo`. |
+| `python3 $S restore FILE [--rows $R] [--out DIR]` | The writes that put a backup back: a `set` per row; with a fresh read, also a `delete` per card or setting the backup lacks (new notes stay). |
 | `python3 $S page --out FILE` | The page to publish for this Desk: the template with its title, keeper, time zone and look. |
 | `python3 $S scrub DRAFT [--rows $R]` | What in a feedback draft might carry the Desk's content (rule 17). |
 | `python3 $S issue-url --title T --body FILE [--rows $R]` | A prefilled new-issue link on the plugin's repo; refuses while `scrub` flags anything. |
@@ -83,15 +86,29 @@ What the script does by itself:
 - `images` replaces the whole `details` array for a fold. Delete each id in `delete_assets`
   from the page's asset store (Artifact `delete`, `url`, `path: <id>`).
 
-**The rule-reload check.** `prep` first runs `git fetch origin main` on the project's clone
-(where `desk.json` sits), on this plugin's own clone, and on each `watch` clone. When
-origin/main changed `CLAUDE.md`, `memory/MEMORY.md`, `.claude/skills/`, `.claude/desk.json`,
-`skills/` or `page/desk.html` since you last loaded them, it stops: exit 1, no deck, no
-footer. Then `git -C <clone> pull origin main`, re-read each file (load a changed skill
-again), and run `loaded`. When the page template changed, republish the Desk in place too:
-`page --out <file>`, then Artifact publish with the Desk's `url` (the cards, notes and look
-live in its database and stay). A failed fetch only warns. A plugin copy that isn't a git
-clone (a plugin install on a computer) isn't checked: there, `claude plugin update`.
+**The rule-reload check.** `prep` first compares the HEAD of the project's clone (where
+`desk.json` sits), of the plugin's clone and of each `watch` clone with what you last loaded;
+it never waits on the network, so it costs no time. The plugin's clone is the one `desk.py` runs from, or
+`~/.claude/desk` when it runs from a copy that isn't a clone (a plugin install). When a
+pull changed `CLAUDE.md`, `memory/MEMORY.md`, `.claude/skills/`, `.claude/desk.json`,
+`skills/` or `page/desk.html` since then, it stops: exit 1, no deck, no footer. Re-read each
+file (load a changed skill again) and run `loaded`. When the page template changed, republish
+the Desk in place too: `page --out <file>`, then Artifact publish with the Desk's `url` (the
+cards, notes and look live in its database and stay). If the publish is refused and hands
+back the live page (often twice on the first switch), merge onto it and publish again until it
+goes through.
+
+**Updating.** New Desk rules arrive by `/desk:update` (the `update` skill): it pulls
+`~/.claude/desk` and does the above in one go. The keeper runs it when the Desk orchestrator
+says a fix merged, or when `prep` says so; the owner can run it any time.
+
+**The update check.** Keepers also notice updates by themselves (2026-10-26). At most once
+every 6 hours, `prep` starts a fetch of the plugin's `main` into its clone, detached, so it
+never waits on the network; when it last did is kept next to the loaded commits
+(`fetched.json`). When a later `prep` sees that fetched `main` changed a rule file past what
+you loaded, it stops: "Desk has an update", exit 1, no deck, no footer. Run `/desk:update` at
+once, without asking the owner, then `prep` again. Offline, no clone, or a failed fetch: it
+skips the check, silently. `--plugin DIR` names the clone to check.
 
 What `check` flags is in the script's messages; each line is `<id>: <problem>` and names the
 rule. A failing check is work before the message, not a note in it. When a flag is wrong (a
@@ -106,7 +123,9 @@ it.
    a session waiting on its own CI counts. Later (scheduled, with its `when`) once the work is
    done and only held for an event that isn't theirs (a release, another PR), or parked until
    a date. A card's ask is always the one question waiting on them now; on a walkthrough, the
-   current step. **Every question put to them in the chat lands on a card in the same turn.**
+   current step. **Every question put to them in the chat lands on a card in the same turn**,
+   as a Waiting card's ask: never in an In-progress or Later card's `note`, `context` or folds
+   (`check` flags those; `prep --message <draft>` flags a question in the draft no card holds).
 2. **One card per task.** Before adding or changing a card, read every waiting and in-progress
    card. A new question about a task goes into its card, never a second card. A card a newer
    step makes pointless is reworked or deleted. A card that waits on others lists them in
@@ -127,8 +146,8 @@ it.
 7. **Rank.** Blocking or time-sensitive first, then reviews, then decisions, then checks by
    hand. A card can be bumped by hand: the rank you want and `rankByHand: true`.
 8. **The footer.** Every message to the owner ends with a horizontal rule, then one link:
-   `[✦ K · ☝︎ N · ∙•● M](<page>#news)`, K news, N waiting minus snoozed, M working, counted from
-   the rows read fresh (`footer`), never from memory. Without news: `[☝︎ N · ∙•● M](<page>#waiting)`.
+   `[✦ K ··· ● N ··· ◌ M](<page>#news)`, K news, N waiting minus snoozed, M working, counted from
+   the rows read fresh (`footer`), never from memory. Without news: `[● N ··· ◌ M](<page>#waiting)`.
 9. **Finished tasks.** No Done list. A finished task with something to tell becomes news with
    its recap (`move … news --context …`). Anything to try by hand stays a Waiting card (kind
    `check`). Otherwise the card closes on their answer (`move … done`).
@@ -138,7 +157,9 @@ it.
 11. **One writer.** Only the keeper writes cards; other sessions report to it. The one write
     anyone else makes is a note into the Inbox (rule 15).
 12. **Before every message.** Rows and notes read fresh, only the sessions behind cards checked,
-    only changed cards written, by small edits. That's `prep`.
+    only changed cards written, by small edits. That's `prep`. Fresh means for this message, a
+    one-line one too: the owner's Seen deletes rows meanwhile. `prep` and `footer` refuse a dump
+    whose oldest row or note was written more than 2 minutes ago ("rows read N min ago").
 13. **A push for every new waiting card.** As soon as a card lands in Waiting (new, a new
     question, or back from a snooze), push the owner in the same turn: one push for all the new
     ones, each named by its title, the most urgent first. Then `pushed`.
@@ -147,9 +168,10 @@ it.
     scheduled job's result worth seeing. Never routine progress. Added in the same turn the
     chat would have said it. A title, a one-line `context`, maybe links, folds and images; never
     an ask; never pushes. It stays until Seen.
-15. **The Inbox.** The owner drops notes from the page's box, from `/desk:note` in any session on
-    the account, or in the keeper's chat. Notes wait in the `inbox` collection and show on the
-    page as a strip ("2 notes being sorted"). The keeper sorts every one before its next message
+15. **The Inbox.** The owner drops notes from the page's note tab (the pencil, last in the bar,
+    owner only; 2026-10-26), from `/desk:note` in any session on the account, or in the keeper's
+    chat. Notes wait in the `inbox` collection and show above the cards as a strip ("2 notes
+    being sorted"), only while some wait. The keeper sorts every one before its next message
     (`prep` stops on them): folds it into its task's card, makes a new card (Waiting if it needs
     a decision, In progress if work starts), or does it at once and posts news; then deletes the
     note (`sorted`). A note's images move onto its card.
@@ -161,12 +183,12 @@ it.
 17. **Feedback on Desk itself.** A fix or a feature for the Desk (not for the project) goes to
     the plugin's repo as an issue that describes **behavior only**: no card text, titles, names,
     links, repos or note text; placeholders ("a waiting card with two folds") instead. Draft it,
-    `scrub` it, show the owner the draft, and only then file it (or hand them `issue-url`'s link
-    to submit from their own GitHub). `/desk:feedback` does this.
+    `scrub` it, show the owner the draft, and only then hand them `issue-url`'s link to submit
+    from their own GitHub; never file it from a session. `/desk:feedback` does this.
 
 ## How it reaches you
 
-The page's buttons and its note box save to the database and post a "sent to Claude" comment,
+The page's buttons and its note tab save to the database and post a "sent to Claude" comment,
 which wakes whichever session **watches** the page (ArtifactComments `watch`): the keeper holds
 that watch. On a wake: read the thread, act, reply in one line, resolve it, update the row.
 

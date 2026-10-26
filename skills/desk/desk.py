@@ -15,6 +15,8 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pathlib import Path
@@ -28,6 +30,10 @@ COLLECTION = "tasks"
 INBOX = "inbox"
 SETTINGS = "settings"
 PLUGIN_REPO = Path(__file__).resolve().parents[2]
+# The plugin's clone at a fixed place: cloud-setup.sh keeps it, `update` pulls it, and a
+# copy of desk.py that isn't in a clone (a plugin install) follows the rules through it.
+PLUGIN_HOME = Path(os.environ.get("DESK_HOME") or Path.home() / ".claude" / "desk")
+PLUGIN_URL = "https://github.com/bagrat/claude-plugin-desk"
 PLUGIN_ISSUES = "https://github.com/bagrat/claude-plugin-desk/issues/new"
 # The themes the page carries (page/desk.html, THEMES); a test keeps the two lists equal.
 THEMES = ("frost", "moss", "ember", "berry", "plum", "sand", "mauve", "rose", "fern", "wave",
@@ -56,6 +62,20 @@ CHAT = re.compile(
     r"|as (i|we) (said|discussed|mentioned)( above| earlier)?",
     re.I,
 )
+# Rule 1: words that put a question to the owner. On a card not Waiting, no ask holds it.
+OWNER_ASK = re.compile(
+    r"\b(your call|yours to \w+|(it's|it is|that's|now) yours|up to you|you decide|for you to \w+"
+    r"|questions? (for|to) (you|the owner)|(waits?|waiting) (on|for) (you|the owner)"
+    r")\b|\b(recommended|recommendation)\s*:",
+    re.I,
+)
+# An ask phrase that isn't open: after a negation ("nothing waits on you"), in the past ("was
+# your call") or a settled stamp ("(your call, 2026-01-01)").
+NEGATED = re.compile(r"(?:\b(?:nothing|no|not|none|never)|n't)(?:[^\S\n]+[\w']+){0,3}[^\S\n]*$", re.I)
+PAST = re.compile(r"\b(?:was|were|had been)[^\S\n]*$", re.I)
+STAMP = re.compile(r"^[^\S\n]*(?:,[^\S\n]*\d{4}-\d{2}-\d{2}[^\S\n]*)?\)")
+# A question aimed at the owner: a sentence ending in "?" that speaks to them.
+OWNER_Q = re.compile(r"[^.!?\n]*\b(you|your|should we|shall we|should i|shall i|ok to|okay to)\b[^.!?\n]*\?", re.I)
 SUPERSEDED = re.compile(r"\b(superseded|replaced|dropped|withdrawn|obsolete|no longer)\b|^\s*(old|was)\b|~~", re.I)
 IMAGE_FILE = re.compile(r"[\w.-]+\.(?:png|jpe?g|webp|gif)\b", re.I)
 SESSION = re.compile(r"session_[A-Za-z0-9]+")
@@ -246,14 +266,14 @@ def news(rows):
 
 
 def footer(rows, now):
-    """Rule 8: ✦ news (only when there is some), ☝︎ waiting, ∙•● working."""
+    """Rule 8: ✦ news (only when there is some), ● waiting, ◌ working."""
     if not PAGE:
         sys.exit("no Desk configured: no .claude/desk.json with a page (run /desk:setup, or pass --desk)")
     n, m = counts(rows, now)
     k = len(by_state(rows, "news"))
     if k:
-        return f"[✦ {k} · ☝︎ {n} · ∙•● {m}]({PAGE}#news)"
-    return f"[☝︎ {n} · ∙•● {m}]({PAGE}#waiting)"
+        return f"[✦ {k} ··· ● {n} ··· ◌ {m}]({PAGE}#news)"
+    return f"[● {n} ··· ◌ {m}]({PAGE}#waiting)"
 
 
 def rank_of(r):
@@ -352,6 +372,15 @@ def quoted(text, m):
     return m.start() > 0 and text[m.start() - 1] in "\"“'‘"
 
 
+def settled(text, m):
+    """An ask phrase that puts no open question: negated, past, or a settled stamp."""
+    if text[m.end():m.end() + 1] == "?":
+        return False
+    before, after = text[:m.start()], text[m.end():]
+    return bool(NEGATED.search(before) or PAST.search(before)
+                or (before.rstrip().endswith("(") and STAMP.match(after)))
+
+
 def check(rows, now, sessions=None, stale_hours=12):
     """Problems, each (row id, message). Rules 1-5, 9, 12, 13 and 14."""
     out = []
@@ -409,6 +438,11 @@ def check(rows, now, sessions=None, stale_hours=12):
             if last and now - last > timedelta(hours=stale_hours):
                 say(r, f"working and untouched for {int((now - last).total_seconds() // 3600)} h")
 
+        if st in ("working", "scheduled"):
+            for field, t in owner_asks(r):
+                say(r, f"{field} asks the owner something (“{short(t, 60)}”): a question to them is never "
+                       f"a note; move {r.id} waiting --ask … --recommend …, with it as its ask (rule 1)")
+
         if st in ("waiting", "working", "news"):
             for field, t in texts(r):
                 m = next((m for m in CHAT.finditer(t) if not quoted(t, m)), None)
@@ -439,6 +473,49 @@ def check(rows, now, sessions=None, stale_hours=12):
                 for c, o in ((a, b), (b, a)):
                     if c.get("kind") == "close":
                         out.append((c.id, f"a wrap-up while {o.id} on the same task is open (rule 9)"))
+    return out
+
+
+def owner_asks(r):
+    """The note, context and folds (but the settled one) that put a question to the owner."""
+    d = r.data
+    fields = [(k, d[k]) for k in ("context", "note") if isinstance(d.get(k), str)]
+    fields += [(f"details[{i}]", f"{f.get('title', '')}\n{f.get('text', '')}")
+               for i, f in enumerate(d.get("details") or []) if f.get("title") != "Settled so far"]
+    for field, t in fields:
+        m = next((m for m in OWNER_ASK.finditer(t) if not quoted(t, m) and not settled(t, m)), None) or OWNER_Q.search(t)
+        if m:
+            yield field, m.group(0).strip()
+
+
+def words(text):
+    return {w for w in re.findall(r"\w+", str(text or "").lower()) if len(w) > 3}
+
+
+def message_asks(text):
+    """A draft's numbered questions and its "Recommended:" lines."""
+    out = []
+    for line in text.splitlines():
+        for part in re.split(r"(?=\(\d+\)\s)", line):
+            m = re.match(r"\s*(?:\(?\d+[.)]\s+|[-*]\s+)?\**(?:recommended|recommendation)\s*:\**\s*(.+)", part, re.I)
+            if m:
+                out.append(m.group(1).strip())
+                continue
+            m = re.match(r"\s*(?:\d+[.)]|\(\d+\))\s+([^?]*\?)(?:.*?\brecommended\s*:\s*(.+))?", part, re.I)
+            if m:
+                out += [g.strip() for g in m.groups() if g]
+    return out
+
+
+def unheld_asks(text, rows):
+    """Rule 1: each question and recommendation in the draft that no Waiting card holds."""
+    held = [words(" ".join(str(r.get(k) or "") for k in ("title", "ask", "recommend", "ifNone")))
+            for r in by_state(rows, "waiting")]
+    out = []
+    for q in message_asks(text):
+        w = words(q)
+        if w and not any(len(w & h) / len(w) >= 0.6 for h in held):
+            out.append(q)
     return out
 
 
@@ -507,18 +584,19 @@ def image_files_problems(r):
 
 # ---------------------------------------------------------------- rule reload
 
-# What a session holds in its head: when origin/main changes one of these after it read
-# them, it must pull and re-read before its next message (2026-10-25). The plugin's own
-# clone counts too: its skills, commands and page are rules, and a new page means the
-# keeper republishes its Desk.
+# What a session holds in its head: when a clone's HEAD changed one of these after it read
+# them, it must re-read before its next message (2026-10-25). The plugin's own clone counts
+# too: its skills, commands and page are rules, and a new page means the keeper republishes
+# its Desk. prep never waits on the network (2026-10-26): `update` pulls the plugin, and any
+# pull counts; prep only starts a detached fetch of the plugin's main (update_check).
 RULE_PATHS = ("CLAUDE.md", "memory/MEMORY.md", ".claude/skills", ".claude/desk.json",
               "skills", "page/desk.html")
 PAGE_PATH = "page/desk.html"
 LOADED = Path(os.environ.get("DESK_LOADED") or Path.home() / ".cache" / "desk" / "loaded.json")
-FETCH_SECONDS = 20
+PULL_SECONDS = 60
 
 
-def git(repo, *args, timeout=FETCH_SECONDS):
+def git(repo, *args, timeout=PULL_SECONDS):
     r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=timeout)
     if r.returncode:
         raise RuntimeError(((r.stderr or r.stdout).strip().splitlines() or ["git failed"])[-1])
@@ -532,15 +610,23 @@ def git_root(path):
         return None
 
 
+def plugin_clone():
+    """The plugin's clone: the one this script runs from, else ~/.claude/desk, else None."""
+    for c in (PLUGIN_REPO, PLUGIN_HOME):
+        if (Path(c) / ".git").exists():
+            return Path(c)
+    return None
+
+
 def rule_repos(given=None):
-    """The project's clone (where desk.json sits), the plugin's own clone, and the clones
-    desk.json names under "watch" that exist here. A copy that isn't a git clone is skipped."""
+    """The project's clone (where desk.json sits), the plugin's clone (plugin_clone), and the
+    clones desk.json names under "watch" that exist here."""
     if given:
         return [Path(g) for g in given]
     cands = []
     if CONFIG_PATH:
         cands.append(git_root(CONFIG_PATH.parent))
-    cands.append(git_root(PLUGIN_REPO) if (PLUGIN_REPO / ".git").exists() else None)
+    cands.append(plugin_clone())
     cands += [Path(w) for w in CONFIG.get("watch") or [] if (Path(w) / ".git").exists()]
     out, seen = [], set()
     for c in cands:
@@ -557,24 +643,19 @@ def load_loaded(path):
         return {}
 
 
-def reload_check(repos, state_path, fetch=True):
-    """(stale, warnings): stale is [(repo, files, loaded, head)] for each repo whose
-    origin/main changed a rule file since it was loaded. A failed fetch only warns."""
+def reload_check(repos, state_path):
+    """(stale, warnings): stale is [(repo, files, loaded, head)] for each repo whose HEAD
+    changed a rule file since it was loaded. No network: it only reads the clones."""
     loaded, stale, warns = load_loaded(state_path), [], []
     for repo in repos:
         key = str(Path(repo).resolve())
-        if fetch:
-            try:
-                git(repo, "fetch", "--quiet", "origin", "main")
-            except (RuntimeError, subprocess.TimeoutExpired, OSError) as e:
-                warns.append(f"{repo}: fetch failed, judged on the last fetch ({e})")
         try:
-            head = git(repo, "rev-parse", "origin/main")
-        except (RuntimeError, OSError) as e:
-            warns.append(f"{repo}: no origin/main, not checked ({e})")
+            head = git(repo, "rev-parse", "HEAD")
+        except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
+            warns.append(f"{repo}: no HEAD, not checked ({e})")
             continue
         # Nothing recorded yet: what's checked out is what the session read at start.
-        base = loaded.get(key) or git(repo, "rev-parse", "HEAD")
+        base = loaded.get(key) or head
         if not loaded.get(key):
             warns.append(f"{repo}: nothing marked loaded; taking HEAD {base[:7]} (run `loaded` after reading)")
         if base == head:
@@ -603,6 +684,88 @@ def mark_loaded(repos, state_path):
     Path(state_path).parent.mkdir(parents=True, exist_ok=True)
     Path(state_path).write_text(json.dumps(state, indent=2) + "\n")
     return state, warns
+
+
+def pull_plugin(home, url=PLUGIN_URL):
+    """Clone the plugin to home, or pull it there. Returns (before, after, warnings)."""
+    home = Path(home)
+    try:
+        if not (home / ".git").exists():
+            home.parent.mkdir(parents=True, exist_ok=True)
+            r = subprocess.run(["git", "clone", "--quiet", str(url), str(home)],
+                               capture_output=True, text=True, timeout=PULL_SECONDS)
+            if r.returncode:
+                raise RuntimeError(((r.stderr or r.stdout).strip().splitlines() or ["git clone failed"])[-1])
+            return None, git(home, "rev-parse", "HEAD"), []
+        before = git(home, "rev-parse", "HEAD")
+        git(home, "pull", "--quiet", "--ff-only", "origin", "main")
+        return before, git(home, "rev-parse", "HEAD"), []
+    except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
+        head = git(home, "rev-parse", "HEAD") if (home / ".git").exists() else None
+        return head, head, [f"{home}: pull failed, judged on what's there ({e})"]
+
+
+# How often prep starts a background fetch of the plugin's main (2026-10-26).
+FETCH_HOURS = 6
+LOCAL_SECONDS = 5
+BACKGROUND = []  # the fetches started, held so they run on unwatched after prep returns
+
+
+def fetched_path(state_path):
+    """When each plugin clone was last fetched: next to the loaded commits."""
+    return Path(state_path).with_name("fetched.json")
+
+
+def start_fetch(clone):
+    """`git fetch origin main` in clone, detached and silent: prep never waits on it."""
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    return subprocess.Popen(["git", "-C", str(clone), "fetch", "--quiet", "origin", "main"],
+                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, env=env, start_new_session=True)
+
+
+def update_check(clone, state_path, now=None, hours=FETCH_HOURS):
+    """(ahead, fetch): ahead is (loaded, origin/main) when the last fetch of the plugin's main
+    brought rule changes past what was loaded, else None; fetch is the background fetch this
+    started (at most once every `hours`), else None. Never raises and never waits on the network."""
+    ahead, proc = None, None
+    try:
+        clone = Path(clone)
+        if not (clone / ".git").exists():
+            return None, None
+        key = str(clone.resolve())
+        try:
+            base = load_loaded(state_path).get(key) or git(clone, "rev-parse", "HEAD", timeout=LOCAL_SECONDS)
+            upstream = git(clone, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/main",
+                           timeout=LOCAL_SECONDS)
+            if upstream != base and git(clone, "rev-list", "--count", f"{base}..{upstream}",
+                                        timeout=LOCAL_SECONDS) != "0":
+                if git(clone, "diff", "--name-only", f"{base}...{upstream}", "--", *RULE_PATHS,
+                       timeout=LOCAL_SECONDS):
+                    ahead = (base, upstream)
+        except (RuntimeError, OSError, subprocess.TimeoutExpired):
+            pass
+        now = now or time.time()
+        fp = fetched_path(state_path)
+        stamps = load_loaded(fp)
+        last = stamps.get(key)
+        if not isinstance(last, (int, float)) or not 0 <= now - last < hours * 3600:
+            stamps[key] = now
+            fp.parent.mkdir(parents=True, exist_ok=True)
+            fp.write_text(json.dumps(stamps, indent=2) + "\n")
+            proc = start_fetch(clone)
+    except Exception:  # noqa: BLE001: a background check never stops a message
+        pass
+    return ahead, proc
+
+
+def print_stale(stale):
+    """What to re-read, and whether the page must be republished."""
+    for repo, files, base, head in stale:
+        print(f"  {repo} ({base[:7]} -> {head[:7]}): {', '.join(files)}")
+    if any(PAGE_PATH in files for _, files, _, _ in stale):
+        print(f"The page changed too: republish the Desk in place "
+              f"(python3 {Path(__file__).name} page --out <file>, then Artifact publish to its url).")
 
 
 # ---------------------------------------------------------------- patches
@@ -801,6 +964,32 @@ def set_images(row, images, fold=None, drop_top=False):
     return patch, sorted(before - after)
 
 
+# ---------------------------------------------------------------- a fresh read (rule 12)
+
+# How old a dump may be when prep and footer count it: Seen on the page deletes rows meanwhile.
+READ_MINUTES = 2
+
+
+def read_age(d):
+    """Seconds since the dump was read: its oldest row or note file, since the script's own
+    writes only make files newer. None when it holds none."""
+    files = [p for p in rows_dir(d).glob("*.json") if not p.name.startswith("_")]
+    i = inbox_dir(d)
+    if i:
+        files += [p for p in i.glob("*.json") if not p.name.startswith("_")]
+    if not files:
+        return None
+    return time.time() - min(p.stat().st_mtime for p in files)
+
+
+def stale_read(d, minutes=READ_MINUTES):
+    age = read_age(d)
+    if age is None or age <= minutes * 60:
+        return None
+    return (f"Stop: rows read {int(age // 60)} min ago: read them fresh (tasks and inbox, into a "
+            f"new directory) and run this again (rule 12).")
+
+
 # ---------------------------------------------------------------- the Inbox (rule 15)
 
 def inbox_dir(d):
@@ -989,6 +1178,16 @@ def cmd_note(a):
     return 0
 
 
+def look_out(current):
+    """Where look.json goes without --out: beside the rows, like the patches; never the cwd,
+    which is usually a project's repo."""
+    if not current:
+        return Path(tempfile.mkdtemp(prefix="desk-look-"))
+    d = Path(current).resolve().parent
+    # ArtifactData writes <out_dir>/settings/look.json; the patches go to <out_dir>/patches.
+    return (d.parent if d.name == SETTINGS else d) / "patches"
+
+
 def cmd_look(a):
     """Rule 16: the Desk's theme and icon, kept in its settings/look row."""
     cur = json.loads(Path(a.current).read_text()) if a.current else None
@@ -998,7 +1197,7 @@ def cmd_look(a):
         print("\n".join(THEMES))
         return 0
     doc = look_doc(a.theme, a.emoji, a.image, a.letter, cur)
-    out = Path(a.out)
+    out = Path(a.out) if a.out else look_out(a.current)
     out.mkdir(parents=True, exist_ok=True)
     f = out / "look.json"
     f.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n")
@@ -1006,13 +1205,78 @@ def cmd_look(a):
     return 0
 
 
+# ---------------------------------------------------------------- the handoff backup
+
+BACKED_UP = (COLLECTION, INBOX, SETTINGS)
+
+
+def dump_dir(d):
+    """The out_dir that holds tasks/, inbox/ and settings/ (given it, or its tasks/)."""
+    d = Path(d)
+    return d.parent if d.name == COLLECTION else d
+
+
+def cmd_backup(a):
+    """Before a handoff: the cards, notes and look as read, in one JSON file with a timestamp."""
+    d = dump_dir(a.rows)
+    out = Path(a.out).resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if git_root(out.parent) and not a.private_repo:
+        sys.exit(f"{out} is inside a git repo; a project's repo may be public. Keep the backup in scratch "
+                 "or the private place the project names (--private-repo once you know that repo is private)")
+    colls = {}
+    for c in BACKED_UP:
+        cd = d / c
+        rows = [load_row(p) for p in sorted(cd.glob("*.json")) if not p.name.startswith("_")] if cd.is_dir() else []
+        colls[c] = {r.id: r.data for r in rows}
+    if not colls[COLLECTION]:
+        sys.exit(f"no cards under {d / COLLECTION}: read tasks, inbox and settings into one out_dir first")
+    out.write_text(json.dumps({"page": PAGE, "at": iso(now_arg(a.now)), "collections": colls},
+                              ensure_ascii=False, indent=2) + "\n")
+    print(f"backup: {out}: " + ", ".join(f"{len(v)} {c}" for c, v in colls.items()))
+    return 0
+
+
+def cmd_restore(a):
+    """The writes that put a backup back: a set per row, and with --rows a delete per card or
+    setting the backup doesn't have. Notes that came in since stay: the owner wrote them."""
+    b = json.loads(Path(a.file).read_text())
+    if PAGE and b.get("page") and b["page"] != PAGE:
+        sys.exit(f"this backup is of {b['page']}, not this Desk's page {PAGE}")
+    out = Path(a.out) if a.out else Path(tempfile.mkdtemp(prefix="desk-restore-"))
+    writes = []
+    for c, rows in b["collections"].items():
+        (out / c).mkdir(parents=True, exist_ok=True)
+        for rid, data in rows.items():
+            f = out / c / f"{rid}.json"
+            f.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+            writes.append(entry_for(c, rid, f))
+    if a.rows:
+        d = dump_dir(a.rows)
+        for c, rows in b["collections"].items():
+            cd = d / c
+            if c != INBOX and cd.is_dir():
+                versions = load_versions(cd)
+                for p in sorted(cd.glob("*.json")):
+                    r = load_row(p)
+                    if not p.name.startswith("_") and r.id not in rows:
+                        e = {"op": "delete", "collection": c, "doc_id": r.id}
+                        v = r.version if r.version is not None else versions.get(r.id)
+                        if v is not None:
+                            e["if_version"] = v
+                        writes.append(e)
+    print(json.dumps({"page": b.get("page"), "at": b.get("at"), "writes": writes}, ensure_ascii=False, indent=2))
+    return 0
+
+
 def cmd_page(a):
     """The page to publish: the template with this Desk's title, keeper and first look."""
-    tpl = Path(a.template) if a.template else PLUGIN_REPO / PAGE_PATH
+    tpl = Path(a.template) if a.template else (plugin_clone() or PLUGIN_REPO) / PAGE_PATH
     html = render_page(tpl.read_text(), CONFIG)
     Path(a.out).write_text(html)
     print(f"wrote {a.out} for {CONFIG.get('title') or 'Desk'}"
-          + (f": publish it to {PAGE}" if PAGE else ": publish it as a new artifact, then put its url in desk.json"))
+          + (f": publish it to {PAGE}; when a publish is refused and hands back the live page, merge"
+             " onto it and publish again until it goes through (the first switch is often refused twice)" if PAGE else ": publish it as a new artifact, then put its url in desk.json"))
     return 0
 
 
@@ -1044,6 +1308,10 @@ def cmd_issue_url(a):
 
 
 def cmd_footer(a):
+    late = stale_read(a.rows, a.max_age)
+    if late:
+        print(late, file=sys.stderr)
+        return 1
     print(footer(load_rows(a.rows), now_arg(a.now)))
     return 0
 
@@ -1164,24 +1432,36 @@ def cmd_images(a):
 
 def cmd_prep(a):
     """Rule 12, before every message: the rules still current, the checks, the deck, the footer."""
-    if not a.no_fetch_rules:
+    if not a.no_rules:
         stale, warns = reload_check(rule_repos(a.repo), a.state)
         for w in warns:
             print(f"warning: {w}", file=sys.stderr)
         if stale:
             print("Stop: the rules changed since you loaded them. Reload before this message:")
-            for repo, files, base, head in stale:
-                print(f"  {repo} ({base[:7]} -> {head[:7]}): {', '.join(files)}")
-            if any(PAGE_PATH in files for _, files, _, _ in stale):
-                print(f"The page changed too: after pulling, republish the Desk in place "
-                      f"(python3 {Path(__file__).name} page --out <file>, then Artifact publish to its url).")
-            print(f"Then: git -C <clone> pull origin main, re-read each file above (load the changed skills "
-                  f"again), and run: python3 {Path(__file__).name} loaded")
+            print_stale(stale)
+            print(f"Then re-read each file above (load the changed skills again) and run: "
+                  f"python3 {Path(__file__).name} loaded. (/desk:update does all of it.)")
             return 1
+        plugin = Path(a.plugin) if a.plugin else plugin_clone()
+        if plugin and (a.plugin or plugin.resolve() in {Path(r).resolve() for r in rule_repos(a.repo)}):
+            ahead, proc = update_check(plugin, a.state)
+            BACKGROUND.extend([proc] if proc else [])
+            if ahead:
+                print(f"Desk has an update ({ahead[0][:7]} -> {ahead[1][:7]} on the plugin's main): "
+                      f"run /desk:update now, then prep again.")
+                return 1
+    late = stale_read(a.rows, a.max_age)
+    if late:
+        print(late)
+        return 1
     if not CONFIG.get("timezone"):
         print("warning: desk.json has no timezone: ask the owner theirs (an IANA name) and add it; times read as UTC till then",
               file=sys.stderr)
     code = cmd_check(a)
+    if a.message:
+        for q in unheld_asks(Path(a.message).read_text(), load_rows(a.rows)):
+            print(f"message: “{short(q)}” is on no Waiting card: put it on its card's ask (rule 1)")
+            code = 1
     notes = load_inbox(a.rows)
     for n in notes:
         print(f"inbox {n.id}: sort this note into a card, then `sorted` (rule 15): {short(n.get('text'))}")
@@ -1209,6 +1489,28 @@ def cmd_loaded(a):
     return 1 if warns else 0
 
 
+def cmd_update(a):
+    """/desk:update: pull the plugin's clone, then name what to re-read (exit 1 when any)."""
+    before, after, warns = pull_plugin(a.home, a.url)
+    repos = rule_repos(a.repo)
+    if Path(a.home).resolve() not in {Path(r).resolve() for r in repos} and (Path(a.home) / ".git").exists():
+        repos.append(Path(a.home))
+    stale, more = reload_check(repos, a.state)
+    for w in warns + more:
+        print(f"warning: {w}", file=sys.stderr)
+    if before is None and after:
+        print(f"cloned {a.home} at {after[:7]}")
+    elif after and before != after:
+        print(f"pulled {a.home}: {before[:7]} -> {after[:7]}")
+    if not stale:
+        print(f"Desk is current at {(after or '?')[:7]}: nothing to re-read.")
+        return 0
+    print("Re-read these (load the changed skills again):")
+    print_stale(stale)
+    print(f"Then run: python3 {Path(__file__).name} loaded, and tell the owner in one line what changed.")
+    return 1
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="desk.py", description=__doc__.split("\n")[0])
     p.add_argument("--desk", help="the Desk's desk.json (default: the nearest .claude/desk.json, or $DESK_CONFIG)")
@@ -1221,6 +1523,11 @@ def main(argv=None):
     s = sub.add_parser("loaded", help="mark the rules reloaded: after pulling and re-reading them")
     rules_args(s)
     s.set_defaults(fn=cmd_loaded)
+    s = sub.add_parser("update", help="/desk:update: pull the plugin's clone, then name what to re-read")
+    rules_args(s)
+    s.add_argument("--home", default=str(PLUGIN_HOME), help="the plugin's clone (default: ~/.claude/desk)")
+    s.add_argument("--url", default=PLUGIN_URL, help="where to clone it from when it's missing")
+    s.set_defaults(fn=cmd_update)
 
     def cmd(name, fn, help):
         s = sub.add_parser(name, help=help)
@@ -1236,8 +1543,16 @@ def main(argv=None):
         s.add_argument("--stale-hours", type=float, default=12)
         if name == "prep":
             rules_args(s)
-            s.add_argument("--no-fetch-rules", action="store_true", help="skip the rule-reload check")
-    cmd("footer", cmd_footer, "the footer line")
+            s.add_argument("--no-rules", "--no-fetch-rules", dest="no_rules", action="store_true",
+                           help="skip the rule-reload and update checks")
+            s.add_argument("--plugin", help="the plugin's clone to check for updates in the background "
+                                            "(default: the plugin's clone, when it's among the watched)")
+            s.add_argument("--max-age", type=float, default=READ_MINUTES,
+                           help=f"refuse rows read longer ago than this, in minutes (default {READ_MINUTES})")
+            s.add_argument("--message", help="the draft about to go out: flag its questions no Waiting card holds")
+    s = cmd("footer", cmd_footer, "the footer line")
+    s.add_argument("--max-age", type=float, default=READ_MINUTES,
+                   help=f"refuse rows read longer ago than this, in minutes (default {READ_MINUTES})")
     cmd("order", cmd_order, "the order the page shows")
     cmd("sessions", cmd_sessions, "the sessions behind open cards, to check one by one")
     s = cmd("rank", cmd_rank, "re-rank waiting cards (rule 7); writes patches")
@@ -1302,13 +1617,27 @@ def main(argv=None):
     g.add_argument("--letter", help="one or two letters on the accent")
     s.add_argument("--current", help="the settings/look row as read, to change only what's given")
     s.add_argument("--list", action="store_true", help="list the themes")
-    s.add_argument("--out", default=".", help="the directory for look.json")
+    s.add_argument("--out", help="the directory for look.json (default: beside --current's rows, "
+                   "in patches/; without --current, a new temp directory)")
     s.set_defaults(fn=cmd_look)
 
     s = sub.add_parser("when", help="a time in the owner's zone: their words to UTC ISO, or an ISO time as they read it")
     s.add_argument("words", help="'tomorrow 9:00', 'today 17:30', '2026-11-02 9:00', or an ISO time with its zone")
     s.add_argument("--now", help="ISO time to judge by (default: now)")
     s.set_defaults(fn=cmd_when)
+
+    s = sub.add_parser("backup", help="before a handoff: tasks, inbox and settings as read, in one JSON file")
+    s.add_argument("rows", help="the out_dir that holds tasks/, inbox/ and settings/")
+    s.add_argument("--out", required=True, help="the backup file: scratch or the project's private notes, never a public repo")
+    s.add_argument("--private-repo", action="store_true", help="allow --out inside a git repo known to be private")
+    s.add_argument("--now")
+    s.set_defaults(fn=cmd_backup)
+
+    s = sub.add_parser("restore", help="the writes that put a backup back")
+    s.add_argument("file")
+    s.add_argument("--out", help="the directory for the row files (default: a new temp directory)")
+    s.add_argument("--rows", help="a fresh read: also delete the rows the backup doesn't have")
+    s.set_defaults(fn=cmd_restore)
 
     s = sub.add_parser("page", help="the page to publish, for this Desk")
     s.add_argument("--out", required=True)

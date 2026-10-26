@@ -12,18 +12,17 @@ with this one. `S=<the desk skill's directory>/desk.py`.
 
 ## At the start (and after a handoff)
 
-1. **The plugin, as a git clone.** The rule-reload check follows the plugin through a git
-   clone. In a cloud session: attach `bagrat/claude-plugin-desk` (read access is enough),
-   clone it as the tool says, and register it (`register_repo_root`) so its skills load.
-   On a computer with the plugin installed, that copy is used and updated by
-   `claude plugin update desk@bagrat`.
+1. **The plugin's clone at `~/.claude/desk`.** The rule-reload check and `/desk:update`
+   follow the plugin through it; `cloud-setup.sh` keeps it in a cloud session. If it's
+   missing, `git clone https://github.com/bagrat/claude-plugin-desk ~/.claude/desk`.
 2. **Watch the page:** ArtifactComments `watch`, `url` the Desk's page. Its buttons and note
    box wake you through that watch; check it registered (`watch` with no url lists them).
 3. Mark the rules as read: `python3 $S loaded`.
 
 ## Before every message to the owner
 
-Every time, in this order:
+Every time, in this order, a one-line message too (never reuse an earlier turn's dump: the
+owner may have cleared news since):
 
 1. Read the rows and notes fresh (ArtifactData `list`, `collection` `tasks`, then `inbox`,
    the same new `out_dir: <scratch>/rows-<HHMM>`); paste each result into that collection's
@@ -35,12 +34,23 @@ Every time, in this order:
    A note that is feedback on Desk itself (not this project) goes the `feedback` skill's way.
 4. Make this turn's changes with `move`, `images`, `rank`, `dep`, and send the entries they
    print with ArtifactData `update` / `delete` / `batch`, pinned to the versions from step 1.
-5. `python3 $S prep <dir> --sessions <scratch>/sessions.json`. When it stops with "the rules
-   changed", pull the clones it names, re-read each file it lists, republish the page if it
-   says the page changed, run `loaded`, and run `prep` again. Fix every problem it prints: a
+5. `python3 $S prep <dir> --sessions <scratch>/sessions.json --message <scratch>/draft.md`,
+   the draft written first when it asks the owner anything: each question in it must be a
+   Waiting card's ask, never a card's note (rule 1). When it stops with "the rules
+   changed", re-read each file it lists, republish the page if it says the page changed (on a
+   refusal that hands back the live page, merge onto it and publish again until it goes
+   through), run `loaded`, and run `prep` again. When it stops with "rows read N min ago",
+   read the rows and notes again into a new directory (the writes you sent are on the page) and
+   run `prep` on that. When it stops with "Desk has an update", run `/desk:update` at once
+   (don't ask the owner), then `prep` again. Fix every problem it prints: a
    blocked child gets a push to the owner at once, with its session link and the exact thing
    to approve; new waiting cards get one push naming them, then `pushed`.
 6. End the message with a horizontal rule and the footer line `prep` printed, as is.
+
+## New Desk rules
+
+When the Desk orchestrator says a fix merged, or `prep` says Desk has an update, run
+`/desk:update` (the `update` skill) at once, without asking the owner.
 
 ## Sessions
 
@@ -57,8 +67,19 @@ Every time, in this order:
 
 ## Handing off
 
-When your context is nearly full or the owner asks: write the live state (waiting cards, live
-sessions and what each waits on, anything mid-flight) where this project keeps such notes,
-spawn the new keeper with this project's repo as its source, update `keeper` in
-`.claude/desk.json`, move your scheduled tasks to it (recreate each, then delete the old),
-tell every live child its new parent, hand over the page's watch, then archive yourself.
+When your context is nearly full or the owner asks:
+
+1. **Back up the Desk first.** Read tasks, inbox and settings fresh into one new directory
+   (ArtifactData `list` each, the same `out_dir: <scratch>/handoff-<HHMM>`), then
+   `python3 $S backup <dir> --out <file>`. Keep the file in the private place the project
+   names for its notes (or your scratch, when it names none), never in the plugin's repo nor any repo that may be public
+   (`backup` refuses a git repo unless you pass `--private-repo`, which you do only for a repo
+   you know is private). Name the file in the handoff notes. If a write goes wrong mid-handoff,
+   `python3 $S restore <file> --rows <a fresh read>` prints the writes that put it back; send
+   them with ArtifactData `batch`.
+2. Write the live state (waiting cards, live sessions and what each waits on, anything
+   mid-flight) where this project keeps such notes, spawn the new keeper with this project's
+   repo as its source, update `keeper` in `.claude/desk.json`, move your scheduled tasks to it
+   (recreate each, then delete the old), tell every live child its new parent, hand over the
+   page's watch, then archive yourself. A backup in your scratch goes with you; the new keeper
+   can restore only from the project's private place.

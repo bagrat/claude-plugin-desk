@@ -4,7 +4,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
 /* Layout: one narrow column, phone first. A sticky bar with the Desk's icon and its tabs (News
-   first, only when there is news), then the Inbox: notes being sorted, and a box to drop one.
+   first, only when there is news; the note box last, owner only), then the notes being sorted.
    It opens on News when there is some; Waiting shows one item at a time, in the order to do
    them, with one-tap answers. Colors: Frost below; the Desk's theme (THEMES) overrides them. */
 :root {
@@ -30,7 +30,7 @@ a { color: var(--accent); }
 a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
 [hidden] { display: none !important; }
 
-/* The header is one line: the Desk's icon, then five tabs, each an icon and a count. */
+/* The header is one line: the Desk's icon, then the tabs, each an icon and maybe a count. */
 header.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); border-bottom: 1px solid var(--edge); display: flex; align-items: center; gap: 6px; height: 50px; }
 .logo { flex: none; width: 30px; height: 30px; }
 .logo { display: grid; place-items: center; border-radius: 8px; overflow: hidden; font: 700 15px var(--f-ui); line-height: 1; }
@@ -38,7 +38,7 @@ header.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; b
 .logo.letter { background: var(--accent); color: var(--accent-ink); }
 .logo img { width: 30px; height: 30px; object-fit: contain; display: block; }
 
-/* The Inbox (rule 15): your notes waiting for the keeper, and the box to drop one. */
+/* The Inbox (rule 15): your notes waiting for the keeper, and the box to drop one (its own tab). */
 .inbox { display: grid; gap: 8px; margin: 10px 0 4px; }
 .strip { border: 1px solid var(--edge); border-radius: 12px; background: var(--chip-bg); font-size: 14px; }
 .strip > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 12px; color: var(--muted); font-weight: 600; }
@@ -48,9 +48,7 @@ header.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; b
 .strip ul { list-style: none; margin: 0; padding: 0 12px 10px; display: grid; gap: 6px; }
 .strip li { display: grid; gap: 2px; padding-top: 6px; border-top: 1px solid var(--edge); }
 .strip li span { color: var(--quiet); font-size: 12px; }
-.note-box > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; color: var(--accent); font-weight: 600; font-size: 14px; }
-.note-box > summary::-webkit-details-marker { display: none; }
-.note-box[open] > summary { margin-bottom: 6px; }
+.note-box.answer textarea { min-height: 140px; background: var(--card); }
 .note-box .row2 { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .note-box input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .note-box .picked { font-size: 13px; color: var(--quiet); }
@@ -202,23 +200,12 @@ footer { margin-top: 28px; font-size: 13px; color: var(--quiet); max-width: 65ch
       <button role="tab" id="tab-working" data-tab="working" aria-label="In progress"><b id="n-working">–</b></button>
       <button role="tab" id="tab-scheduled" data-tab="scheduled" aria-label="Coming up"><b id="n-scheduled">–</b></button>
       <button role="tab" id="tab-all" data-tab="all" aria-label="Everything on one page"></button>
+      <button role="tab" id="tab-note" data-tab="note" aria-label="Drop a note" hidden></button>
     </nav>
   </header>
 
-  <section class="inbox" id="inbox" aria-label="Notes">
+  <section class="inbox" id="inbox" aria-label="Notes" hidden>
     <details class="strip" id="strip" hidden><summary><span class="pulse"></span><span id="strip-n"></span></summary><ul id="strip-l"></ul></details>
-    <details class="note-box" id="note-box" hidden>
-      <summary>✎ Drop a note</summary>
-      <div class="answer">
-        <textarea id="note-text" placeholder="An observation, a change you want: type or dictate…" aria-label="Your note"></textarea>
-        <div class="row2">
-          <button type="button" class="btn primary" id="note-send">Send to the keeper</button>
-          <label class="btn" id="note-pick-l" for="note-pick">Add a screenshot</label><input type="file" id="note-pick" accept="image/*" multiple>
-          <span class="picked" id="note-picked"></span>
-        </div>
-        <span class="sent" id="note-st"></span>
-      </div>
-    </details>
   </section>
 
   <section id="p-news" role="tabpanel" aria-labelledby="tab-news" hidden>
@@ -241,6 +228,18 @@ footer { margin-top: 28px; font-size: 13px; color: var(--quiet); max-width: 65ch
     <h2>Coming up</h2><div class="list" id="a-scheduled"></div>
     <p class="stamp" id="stamp"></p>
   </section>
+  <section id="p-note" role="tabpanel" aria-labelledby="tab-note" hidden>
+    <h2>Drop a note</h2>
+    <div class="note-box answer" id="note-box">
+      <textarea id="note-text" placeholder="An observation, a change you want: type or dictate…" aria-label="Your note"></textarea>
+      <div class="row2">
+        <button type="button" class="btn primary" id="note-send">Send to the keeper</button>
+        <label class="btn" id="note-pick-l" for="note-pick">Add a screenshot</label><input type="file" id="note-pick" accept="image/*" multiple>
+        <span class="picked" id="note-picked"></span>
+      </div>
+      <span class="sent" id="note-st"></span>
+    </div>
+  </section>
 
 </div>
 
@@ -258,6 +257,7 @@ const ICON = {
   scheduled: '<path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5M16 2v4M8 2v4M3 10h5"/><circle cx="16" cy="16" r="6"/><path d="M16 14v2l1 1"/>',
   done: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4 12 14.01l-3-3"/>',
   all: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  note: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
   go: '<path d="M7 10v12M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/>',
   later: '<path d="m5 4 10 8-10 8zM19 5v14"/>',
   mic: '<path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/>',
@@ -524,12 +524,13 @@ function applyIcon(icon) {
 function applyLook(look) { const l = Object.assign({}, DESK_LOOK, look || {}); applyTheme(l.theme); applyIcon(l.icon); }
 
 // The Inbox (rule 15): notes dropped here, or by /desk:note in any session, wait in the inbox
-// collection until the keeper turns each into a card and deletes it. The strip shows them.
+// collection until the keeper turns each into a card and deletes it. The strip, above the
+// cards, shows them; the box to drop one is the last tab, the owner's only.
 let assets = null;
 const picked = [];
 function drawInbox(docs) {
   const notes = docs.map((s) => [s.id, s.data() || {}]).sort((a, b) => String(a[1].at).localeCompare(String(b[1].at)));
-  $("strip").hidden = !notes.length;
+  $("inbox").hidden = $("strip").hidden = !notes.length;
   $("strip-n").textContent = notes.length === 1 ? "1 note being sorted" : notes.length + " notes being sorted";
   $("strip-l").replaceChildren(...notes.map(([, n]) => {
     const li = el("li"); li.append(el("div", null, n.text || ""));
@@ -539,7 +540,7 @@ function drawInbox(docs) {
   }));
 }
 function setupNoteBox() {
-  $("note-box").hidden = false;
+  $("tab-note").hidden = false;
   if (!assets) $("note-pick-l").hidden = true;
   $("note-pick").onchange = (e) => { picked.push(...e.target.files); $("note-picked").textContent = picked.length ? picked.length + " image" + (picked.length > 1 ? "s" : "") + " added" : ""; e.target.value = ""; };
   $("note-send").onclick = async () => {
@@ -547,7 +548,7 @@ function setupNoteBox() {
     if (!text && !picked.length) { ta.focus(); return; }
     send.disabled = true; $("note-st").textContent = "Saving…";
     const at = new Date().toISOString(), id = "n-" + at.replace(/\D/g, "").slice(0, 14) + "-" + Math.random().toString(16).slice(2, 6);
-    const sending = tell("[Desk note] " + (text || "(images only)") + " (inbox " + id + ")", cm ? cm.anchorFor($("inbox")) : null);
+    const sending = tell("[Desk note] " + (text || "(images only)") + " (inbox " + id + ")", cm ? cm.anchorFor($("p-note")) : null);
     try {
       const images = [];
       for (const f of picked) { const a = await assets.upload(f); images.push({ id: a.id, caption: f.name || "" }); }
@@ -713,12 +714,12 @@ function fill(list, nodes, emptyText) { list.replaceChildren(...(nodes.length ? 
 // tab): Waiting at the first item when anything changed since you last looked, otherwise where
 // you left off. The same holds when you come back to a page left open.
 const ui = { tab: "waiting", focus: store.get("focus", null), showLater: false, deck: [], news: [], rows: {}, open: new Set(), moreOpen: {} };
-const TABS = ["news", "waiting", "working", "scheduled", "all"];
+const TABS = ["news", "waiting", "working", "scheduled", "all", "note"];
 const home = () => ui.news.length ? "news" : "waiting";
 function setTab(tab) {
   ui.tab = tab;
   for (const b of document.querySelectorAll(".tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === tab));
-  for (const p of ["news", "waiting", "working", "scheduled", "all"]) $("p-" + p).hidden = p !== tab;
+  for (const p of TABS) $("p-" + p).hidden = p !== tab;
   if (tab === "news") for (const id of ui.news) markSeen(id, ui.rows[id]);
   window.scrollTo({ top: 0 });
 }
@@ -893,7 +894,7 @@ function render(docs) {
   if (!render.opened) {
     render.opened = true; if (ui.deck.some((id) => badgeOf(id, ui.rows[id]))) ui.focus = ui.deck[0];
     const h = location.hash.slice(1);
-    setTab(TABS.includes(h) && (h !== "news" || news.length) ? h : home());
+    setTab(TABS.includes(h) && (h !== "news" || news.length) && (h !== "note" || isOwner) ? h : home());
   }
   else if (ui.tab === "news" && !news.length) setTab("waiting");
   else if (ui.tab === "news") for (const id of ui.news) markSeen(id, ui.rows[id]);

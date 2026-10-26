@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -44,7 +45,7 @@ class Base(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         cfg = self.root / "desk.json"
-        cfg.write_text(json.dumps({"title": "Test Desk", "page": PAGE}))
+        cfg.write_text(json.dumps({"title": "Test Desk", "page": PAGE, "timezone": "UTC"}))
         self._env = os.environ.get("DESK_CONFIG")
         os.environ["DESK_CONFIG"] = str(cfg)
         tasks.load_config()
@@ -118,7 +119,7 @@ class Footer(Base):
         self.put("e", {"state": "scheduled", "title": "r"})
         code, out, _ = self.run_cli("footer", self.root / "dump", "--now", NOW)
         self.assertEqual(code, 0)
-        self.assertEqual(out.strip(), "[☝︎ 2 · ∙•● 1](https://claude.ai/artifact/DESKTEST#waiting)")
+        self.assertEqual(out.strip(), "[● 2 ··· ◌ 1](https://claude.ai/artifact/DESKTEST#waiting)")
 
 
 class Order(Base):
@@ -251,6 +252,66 @@ class Checks(Base):
         self.assertTrue(any("details[0] points at the chat" in m for m in self.msgs("b")))
         self.assertEqual(self.msgs("c"), [])
 
+    def test_question_to_owner_in_a_note_or_fold(self):
+        # Issue 25: a question parked in an in-progress card's note never reaches Waiting.
+        self.put("a", working(note="Two questions for you: (1) Do X? Recommended: yes. (2) Do Y? Recommended: yes."))
+        self.put("b", {"state": "scheduled", "kind": "do", "title": "L", "when": "the release",
+                       "details": [{"title": "Open", "text": "Your call: ship it Friday or Monday?"}]})
+        self.put("c", working(context="Should we keep the old flag, or drop it?"))
+        self.put("d", working(note="Tests pass; waiting on CI."))
+        self.put("e", working(details=[{"title": "Settled so far", "text": "Ship Friday? Recommended: yes. Answer: yes."}]))
+        self.put("f", working(note='Never write "your call" in a note.'))
+        s = {"session_01AAAA": "working"}
+        self.assertTrue(any("note asks the owner" in m and "move a waiting" in m for m in self.msgs("a", s)))
+        self.assertTrue(any("details[0] asks the owner" in m for m in self.msgs("b", s)))
+        self.assertTrue(any("context asks the owner" in m for m in self.msgs("c", s)))
+        for rid in "def":
+            self.assertEqual(self.msgs(rid, s), [], rid)
+
+    def test_negated_or_settled_phrase_is_no_question(self):
+        # Issue 29: a mention of the owner with no open question isn't one.
+        quiet = [
+            {"note": "Done; nothing waits on you"},
+            {"note": "No question for you here."},
+            {"note": "This isn't your call: the tests decide."},
+            {"note": "None of it is waiting on you."},
+            {"details": [{"title": "The plan (your call, 2026-01-01)", "text": "Ship it Friday."}]},
+            {"note": "Picked Friday; it was your call."},
+            {"note": "You decided on Friday; you chose the short name."},
+        ]
+        loud = [
+            {"note": "Friday or Monday: your call?"},
+            {"note": "You decide: Friday or Monday."},
+            {"note": "Nothing is blocked. Your call: Friday or Monday."},
+            {"note": "Done. Should we ship it Friday?"},
+            {"note": "Not done yet; waits on you for the key."},
+        ]
+        s = {"session_01AAAA": "working"}
+        for i, f in enumerate(quiet):
+            self.put(f"q{i}", working(**f))
+        for i, f in enumerate(loud):
+            self.put(f"l{i}", working(**f))
+        for i, f in enumerate(quiet):
+            self.assertEqual(self.msgs(f"q{i}", s), [], f)
+        for i, f in enumerate(loud):
+            self.assertTrue(any("asks the owner" in m for m in self.msgs(f"l{i}", s)), f)
+
+    def test_prep_message_flags_questions_on_no_card(self):
+        self.put("a", waiting(ask="Merge the price box change now?", recommend="Yes, merge it."))
+        draft = self.root / "draft.md"
+        draft.write_text("Done with the menu.\n\n1. Merge the price box change now?\n"
+                         "2. Rename the export button to Download?\nRecommended: rename it, it reads clearer.\n")
+        code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-rules", "--message", draft)
+        self.assertEqual(code, 1, out)
+        self.assertIn("Rename the export button", out)
+        self.assertNotIn("“Merge the price box", out)
+        self.assertIn("rename it, it reads clearer", out)
+        self.assertNotIn("check: ok", out)
+        draft.write_text("All set: the menu shipped.\n")
+        code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-rules", "--message", draft)
+        self.assertEqual(code, 0, out)
+        self.assertIn("check: ok", out)
+
     def test_same_handle_twice(self):
         self.put("a", waiting(handle="Price box"))
         self.put("b", working(handle="price box"))
@@ -300,10 +361,10 @@ class Checks(Base):
         code, out, _ = self.run_cli("check", self.dir, "--now", NOW)
         self.assertEqual(code, 1)
         self.assertIn("a: waiting with no ask", out)
-        code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-fetch-rules")
+        code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-rules")
         self.assertEqual(code, 1)
         self.assertIn("Waiting:", out)
-        self.assertIn("[☝︎ 1 · ∙•● 0]", out)
+        self.assertIn("[● 1 ··· ◌ 0]", out)
 
 
 class Move(Base):
@@ -423,11 +484,48 @@ class News(Base):
         self.put("a", waiting())
         self.put("b", working())
         _, out, _ = self.run_cli("footer", self.dir, "--now", NOW)
-        self.assertEqual(out.strip(), "[☝︎ 1 · ∙•● 1](https://claude.ai/artifact/DESKTEST#waiting)")
+        self.assertEqual(out.strip(), "[● 1 ··· ◌ 1](https://claude.ai/artifact/DESKTEST#waiting)")
         self.put("n1", news())
         self.put("n2", news())
         _, out, _ = self.run_cli("footer", self.dir, "--now", NOW)
-        self.assertEqual(out.strip(), "[✦ 2 · ☝︎ 1 · ∙•● 1](https://claude.ai/artifact/DESKTEST#news)")
+        self.assertEqual(out.strip(), "[✦ 2 ··· ● 1 ··· ◌ 1](https://claude.ai/artifact/DESKTEST#news)")
+
+    def test_a_stale_dump_is_refused(self):
+        # #21: Seen deleted the news row after the dump was read; the old dump must not count it.
+        self.put("a", waiting())
+        self.put("n1", news())
+        old = time.time() - 5 * 60
+        for f in self.dir.glob("*.json"):
+            os.utime(f, (old, old))
+        code, out, err = self.run_cli("footer", self.dir, "--now", NOW)
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("rows read 5 min ago: read them fresh", err)
+        code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-rules")
+        self.assertEqual(code, 1)
+        self.assertIn("rows read 5 min ago: read them fresh", out)
+        self.assertNotIn("✦", out)
+        # A row left over from an older read into the same directory is stale too.
+        self.put("b", working())
+        self.assertEqual(self.run_cli("footer", self.dir, "--now", NOW)[0], 1)
+        # Written fresh: counted.
+        for f in self.dir.glob("*.json"):
+            os.utime(f)
+        code, out, _ = self.run_cli("footer", self.dir, "--now", NOW)
+        self.assertEqual(code, 0)
+        self.assertIn("[✦ 1 ··· ● 1 ··· ◌ 1]", out)
+        os.utime(self.dir / "a.json", (old, old))
+        self.assertEqual(self.run_cli("footer", self.dir, "--now", NOW, "--max-age", 10)[0], 0)
+
+    def test_a_stale_note_stops_prep_too(self):
+        self.put("a", waiting())
+        d = self.root / "dump" / "inbox"
+        d.mkdir()
+        (d / "n-1.json").write_text(json.dumps({"text": "x", "from": "page", "at": NOW}))
+        old = time.time() - 3 * 60
+        os.utime(d / "n-1.json", (old, old))
+        code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-rules")
+        self.assertEqual(code, 1)
+        self.assertIn("rows read 3 min ago", out)
 
     def test_order_and_prep_list_news_first(self):
         self.put("a", waiting(title="A card"))
@@ -435,9 +533,9 @@ class News(Base):
         self.put("new", news(title="Newer news"))
         _, out, _ = self.run_cli("order", self.dir, "--now", NOW)
         self.assertTrue(out.startswith("News:\n  - new: Newer news\n  - old: Older news\nWaiting:"), out)
-        _, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-fetch-rules")
+        _, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-rules")
         self.assertLess(out.index("News:"), out.index("Waiting:"))
-        self.assertIn("[✦ 2 · ☝︎ 1 · ∙•● 0]", out)
+        self.assertIn("[✦ 2 ··· ● 1 ··· ◌ 0]", out)
         # No news: no News heading.
         (self.dir / "old.json").unlink()
         (self.dir / "new.json").unlink()
@@ -643,7 +741,7 @@ def sh(repo, *args):
 
 
 class RuleReload(Base):
-    """prep stops when origin/main changed a rule file since it was loaded."""
+    """prep stops when a clone's HEAD changed a rule file since it was loaded."""
 
     def setUp(self):
         super().setUp()
@@ -660,6 +758,11 @@ class RuleReload(Base):
         self.state = self.root / "state" / "loaded.json"
         self.put("a", waiting())
 
+    def tearDown(self):
+        while tasks.BACKGROUND:  # let the background fetches finish before the clones go
+            tasks.BACKGROUND.pop().wait(timeout=30)
+        super().tearDown()
+
     def commit(self, repo, files):
         for name, text in files.items():
             (repo / name).parent.mkdir(parents=True, exist_ok=True)
@@ -674,19 +777,20 @@ class RuleReload(Base):
     def test_nothing_changed_runs_on(self):
         code, out, err = self.prep()
         self.assertEqual(code, 0, out)
-        self.assertIn("[☝︎ 1", out)
+        self.assertIn("[● 1", out)
         self.assertIn("nothing marked loaded; taking HEAD", err)
 
     def test_a_changed_rule_stops_it(self):
+        self.run_cli("loaded", "--repo", self.clone, "--state", self.state)
         self.commit(self.seed, {"CLAUDE.md": "new rules", ".claude/skills/x/SKILL.md": "s2", "README.md": "r2"})
+        sh(self.clone, "pull", "-q", "origin", "main")
         code, out, _ = self.prep()
         self.assertEqual(code, 1)
         self.assertIn("Stop: the rules changed", out)
         self.assertIn(".claude/skills/x/SKILL.md, CLAUDE.md", out)
         self.assertNotIn("README.md", out)
-        self.assertNotIn("☝︎", out)  # no footer
-        # Pulled and re-read: marked loaded, it runs on.
-        sh(self.clone, "pull", "-q", "origin", "main")
+        self.assertNotIn("◌", out)  # no footer
+        # Re-read: marked loaded, it runs on.
         code, out, err = self.run_cli("loaded", "--repo", self.clone, "--state", self.state)
         self.assertEqual((code, err), (0, ""))
         self.assertEqual(json.loads(self.state.read_text()), {str(self.clone.resolve()): sh(self.clone, "rev-parse", "HEAD")})
@@ -695,8 +799,10 @@ class RuleReload(Base):
     def test_memory_changes_count_other_files_dont(self):
         self.run_cli("loaded", "--repo", self.clone, "--state", self.state)
         self.commit(self.seed, {"README.md": "r3", "memory/archive.md": "old"})
+        sh(self.clone, "pull", "-q", "origin", "main")
         self.assertEqual(self.prep()[0], 0)
         self.commit(self.seed, {"memory/MEMORY.md": "m2"})
+        sh(self.clone, "pull", "-q", "origin", "main")
         code, out, _ = self.prep()
         self.assertEqual(code, 1)
         self.assertIn("memory/MEMORY.md", out)
@@ -707,19 +813,133 @@ class RuleReload(Base):
         code, _, err = self.run_cli("loaded", "--repo", self.clone, "--state", self.state)
         self.assertEqual(code, 1)
         self.assertIn("behind origin/main on CLAUDE.md", err)
-        self.assertEqual(self.prep()[0], 1)
 
-    def test_offline_warns_but_doesnt_block(self):
+    def test_prep_never_fetches(self):
+        # The reload check judges by the clone's HEAD alone (the plugin's clone, not watched here,
+        # gets no background fetch): a change upstream waits for a pull.
         self.run_cli("loaded", "--repo", self.clone, "--state", self.state)
         sh(self.clone, "remote", "set-url", "origin", str(self.root / "nowhere.git"))
         code, out, err = self.prep()
+        self.assertEqual((code, err), (0, ""), out)
+        self.assertIn("[● 1", out)
+        sh(self.clone, "remote", "set-url", "origin", str(self.origin))
+        self.commit(self.seed, {"CLAUDE.md": "newer"})
+        self.assertEqual(self.prep()[0], 0)
+        self.assertNotEqual(sh(self.clone, "rev-parse", "origin/main"), sh(self.seed, "rev-parse", "HEAD"))
+
+    def prep_plugin(self):
+        return self.run_cli("prep", self.dir, "--now", NOW, "--repo", self.clone, "--plugin", self.clone,
+                            "--state", self.state)
+
+    def test_prep_notices_an_update_in_the_background(self):
+        self.run_cli("loaded", "--repo", self.clone, "--state", self.state)
+        self.commit(self.seed, {"skills/desk/SKILL.md": "new rules"})
+        # The first prep starts the fetch and runs on: it never waits for it.
+        ahead, proc = tasks.update_check(self.clone, self.state)
+        self.assertIsNone(ahead)
+        self.assertIsNotNone(proc)
+        proc.wait(timeout=30)
+        self.assertEqual(sh(self.clone, "rev-parse", "origin/main"), sh(self.seed, "rev-parse", "HEAD"))
+        self.assertNotEqual(sh(self.clone, "rev-parse", "HEAD"), sh(self.seed, "rev-parse", "HEAD"))
+        # The next one sees the fetched main ahead of what was loaded: it stops, no deck, no footer.
+        code, out, _ = self.prep_plugin()
+        self.assertEqual(code, 1, out)
+        self.assertIn("Desk has an update", out)
+        self.assertIn("/desk:update", out)
+        self.assertNotIn("[●", out)
+        # /desk:update pulls it; once loaded, prep runs on.
+        self.update()
+        self.run_cli("loaded", "--repo", self.clone, "--state", self.state)
+        self.assertEqual(self.prep_plugin()[0], 0)
+
+    def test_an_update_that_misses_the_rules_doesnt_stop_it(self):
+        self.run_cli("loaded", "--repo", self.clone, "--state", self.state)
+        self.commit(self.seed, {"README.md": "r2"})
+        sh(self.clone, "fetch", "-q", "origin", "main")
+        self.assertEqual(self.prep_plugin()[0], 0)
+
+    def test_fetches_at_most_every_six_hours(self):
+        t = 1_000_000.0
+        _, proc = tasks.update_check(self.clone, self.state, now=t)
+        proc.wait(timeout=30)
+        stamps = json.loads(tasks.fetched_path(self.state).read_text())
+        self.assertEqual(stamps, {str(self.clone.resolve()): t})
+        self.assertIsNone(tasks.update_check(self.clone, self.state, now=t + 5 * 3600)[1])
+        _, proc = tasks.update_check(self.clone, self.state, now=t + 6 * 3600)
+        self.assertIsNotNone(proc)
+        proc.wait(timeout=30)
+
+    def test_offline_or_missing_clone_never_fails_or_slows_prep(self):
+        self.run_cli("loaded", "--repo", self.clone, "--state", self.state)
+        sh(self.clone, "remote", "set-url", "origin", "https://127.0.0.1:9/nowhere.git")
+        start = time.monotonic()
+        code, out, err = self.prep_plugin()
+        self.assertLess(time.monotonic() - start, 5)
+        self.assertEqual((code, err), (0, ""), out)
+        self.assertIn("[● 1", out)
+        self.assertEqual(tasks.update_check(self.root / "missing", self.state), (None, None))
+        code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--repo", self.clone,
+                                    "--plugin", self.root / "missing", "--state", self.state)
         self.assertEqual(code, 0, out)
-        self.assertIn("fetch failed", err)
-        self.assertIn("[☝︎ 1", out)
+
+    def test_a_pull_made_elsewhere_still_stops_it(self):
+        self.run_cli("loaded", "--repo", self.clone, "--state", self.state)
+        self.commit(self.seed, {".claude/skills/x/SKILL.md": "s2"})
+        sh(self.clone, "pull", "-q", "origin", "main")
+        code, out, _ = self.prep()
+        self.assertEqual(code, 1)
+        self.assertIn("Stop: the rules changed", out)
+        self.assertIn("/desk:update", out)
+
+    def update(self, home=None):
+        home = home or self.clone
+        return self.run_cli("update", "--home", home, "--url", self.origin, "--repo", self.clone, "--state", self.state)
+
+    def test_update_pulls_and_names_what_changed(self):
+        self.run_cli("loaded", "--repo", self.clone, "--state", self.state)
+        before = sh(self.clone, "rev-parse", "HEAD")
+        self.commit(self.seed, {"skills/desk/SKILL.md": "r2", "page/desk.html": "<p>", "README.md": "r2"})
+        code, out, _ = self.update()
+        self.assertEqual(code, 1, out)
+        self.assertEqual(sh(self.clone, "rev-parse", "HEAD"), sh(self.seed, "rev-parse", "HEAD"))
+        self.assertIn(f"{before[:7]} -> {sh(self.seed, 'rev-parse', 'HEAD')[:7]}", out)
+        self.assertIn("page/desk.html, skills/desk/SKILL.md", out)
+        self.assertNotIn("README.md", out)
+        self.assertIn("republish the Desk in place", out)
+        self.run_cli("loaded", "--repo", self.clone, "--state", self.state)
+        code, out, _ = self.update()
+        self.assertEqual(code, 0, out)
+        self.assertIn("Desk is current at", out)
+        self.assertEqual(self.prep()[0], 0)
+
+    def test_update_clones_when_missing(self):
+        home = self.root / "home" / ".claude" / "desk"
+        code, out, _ = self.run_cli("update", "--home", home, "--url", self.origin, "--repo", home,
+                                    "--state", self.state)
+        self.assertEqual(sh(home, "rev-parse", "HEAD"), sh(self.seed, "rev-parse", "HEAD"))
+        self.assertIn(f"cloned {home}", out)
+
+    def test_update_offline_warns(self):
+        self.run_cli("loaded", "--repo", self.clone, "--state", self.state)
+        sh(self.clone, "remote", "set-url", "origin", str(self.root / "nowhere.git"))
+        code, out, err = self.update()
+        self.assertEqual(code, 0, out)
+        self.assertIn("pull failed", err)
 
     def test_default_repos(self):
-        self.assertIn(tasks.PLUGIN_REPO.resolve(), [r.resolve() for r in tasks.rule_repos()] if (tasks.PLUGIN_REPO / ".git").exists() else [tasks.PLUGIN_REPO.resolve()])
         self.assertEqual(tasks.rule_repos([self.clone]), [self.clone])
+        # Run from a copy that isn't a clone (a plugin install): ~/.claude/desk is the plugin's clone.
+        saved = tasks.PLUGIN_REPO, tasks.PLUGIN_HOME
+        try:
+            tasks.PLUGIN_REPO, tasks.PLUGIN_HOME = self.root / "installed", self.clone
+            self.assertEqual(tasks.plugin_clone(), self.clone)
+            self.assertIn(self.clone.resolve(), [r.resolve() for r in tasks.rule_repos()])
+            tasks.PLUGIN_HOME = self.root / "missing"
+            self.assertIsNone(tasks.plugin_clone())
+            tasks.PLUGIN_REPO = self.clone
+            self.assertEqual(tasks.plugin_clone(), self.clone)
+        finally:
+            tasks.PLUGIN_REPO, tasks.PLUGIN_HOME = saved
 
 
 class DeskTests(Base):
@@ -767,15 +987,60 @@ class DeskTests(Base):
         self.put("a", waiting())
         (self.note_dir() / "n-1.json").write_text(json.dumps({"text": "fix the dashes", "from": "page", "at": NOW}))
         (self.root / "dump" / "inbox" / "_versions.json").write_text(json.dumps({"n-1": 3}))
-        code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-fetch-rules")
+        code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-rules")
         self.assertEqual(code, 1)
         self.assertIn("inbox n-1: sort this note", out)
-        self.assertIn("[☝︎ 1", out)
+        self.assertIn("[● 1", out)
         code, out, _ = self.run_cli("sorted", self.root / "dump", "n-1")
         self.assertEqual(json.loads(out), [{"op": "delete", "collection": "inbox", "doc_id": "n-1", "if_version": 3}])
-        code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-fetch-rules")
+        code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-rules")
         self.assertEqual(code, 0, out)
         self.assertIn("check: ok", out)
+
+    def test_backup_and_restore_round_trip(self):
+        self.put("a", waiting(title="Pick a font"), version=4)
+        self.put("b", working())
+        (self.note_dir() / "n-1.json").write_text(json.dumps({"text": "fix the dashes", "from": "page", "at": NOW}))
+        (self.root / "dump" / "settings").mkdir()
+        (self.root / "dump" / "settings" / "look.json").write_text(json.dumps({"theme": "moss", "icon": {"emoji": "📦"}}))
+        f = self.root / "scratch" / "desk-backup.json"
+        code, out, _ = self.run_cli("backup", self.root / "dump", "--out", f, "--now", NOW)
+        self.assertEqual(code, 0)
+        b = json.loads(f.read_text())
+        self.assertEqual((b["page"], b["at"]), (PAGE, NOW))
+        self.assertEqual(b["collections"]["tasks"]["a"]["title"], "Pick a font")
+        self.assertEqual(b["collections"]["inbox"]["n-1"]["text"], "fix the dashes")
+        self.assertEqual(b["collections"]["settings"]["look"]["theme"], "moss")
+        # A write went wrong: a card lost its title, a stray card appeared. Restore puts it back.
+        self.put("a", waiting(title="oops"), version=5)
+        self.put("c", working(title="stray"), version=2)
+        (self.note_dir() / "n-2.json").write_text(json.dumps({"text": "new", "from": "page", "at": NOW}))
+        out_dir = self.root / "restore"
+        code, out, _ = self.run_cli("restore", f, "--out", out_dir, "--rows", self.root / "dump")
+        self.assertEqual(code, 0)
+        res = json.loads(out)
+        self.assertEqual(res["page"], PAGE)
+        sets = {(e["collection"], e["doc_id"]): e for e in res["writes"] if e["op"] == "set"}
+        self.assertEqual(set(sets), {("tasks", "a"), ("tasks", "b"), ("inbox", "n-1"), ("settings", "look")})
+        for (coll, rid), e in sets.items():
+            self.assertEqual(json.loads(Path(e["file_path"]).read_text()), b["collections"][coll][rid])
+            self.assertTrue(Path(e["file_path"]).is_relative_to(out_dir))
+        dels = [(e["collection"], e["doc_id"]) for e in res["writes"] if e["op"] == "delete"]
+        self.assertEqual(dels, [("tasks", "c")])  # n-2 came in since: the owner's, it stays
+        self.assertIn({"op": "delete", "collection": "tasks", "doc_id": "c", "if_version": 2}, res["writes"])
+        self.assertTrue((self.dir / "c.json").exists())
+
+    def test_backup_stays_out_of_repos(self):
+        self.put("a", waiting())
+        repo = self.root / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        with self.assertRaises(SystemExit) as e:
+            self.run_cli("backup", self.root / "dump", "--out", repo / "backup.json")
+        self.assertIn("inside a git repo", str(e.exception.code))
+        self.assertFalse((repo / "backup.json").exists())
+        code, _, _ = self.run_cli("backup", self.root / "dump", "--out", repo / "backup.json", "--private-repo")
+        self.assertEqual(code, 0)
 
     def test_look(self):
         code, out, _ = self.run_cli("look", "--theme", "Lagoon", "--emoji", "💼", "--out", self.root)
@@ -790,6 +1055,27 @@ class DeskTests(Base):
             self.run_cli("look", "--theme", "teal", "--out", self.root)
         with self.assertRaises(SystemExit):
             self.run_cli("look", "--image", "not-an-id", "--out", self.root)
+
+    def test_look_never_writes_into_the_cwd(self):
+        repo = self.root / "repo"
+        repo.mkdir()
+        old = os.getcwd()
+        os.chdir(repo)
+        try:
+            code, out, _ = self.run_cli("look", "--theme", "plum", "--emoji", "🗂️")
+            self.assertEqual(code, 0)
+            self.assertEqual(list(repo.iterdir()), [])
+            f = Path(json.loads(out)["file_path"])
+            self.assertEqual(json.loads(f.read_text())["theme"], "plum")
+            # Given the row as read, it writes beside the rows, like the patches.
+            dump = self.root / "look" / "settings"
+            dump.mkdir(parents=True)
+            (dump / "look.json").write_text(json.dumps({"id": "look", "data": {"theme": "plum"}, "version": 1}))
+            code, out, _ = self.run_cli("look", "--letter", "D", "--current", dump / "look.json")
+            self.assertEqual(Path(json.loads(out)["file_path"]), (self.root / "look" / "patches" / "look.json").resolve())
+            self.assertEqual(list(repo.iterdir()), [])
+        finally:
+            os.chdir(old)
 
     def test_themes_match_the_page(self):
         html = (tasks.PLUGIN_REPO / "page" / "desk.html").read_text()
@@ -814,6 +1100,14 @@ class DeskTests(Base):
         self.assertIn('ICON={"emoji": "🗂️"}', html)
         self.assertIn('TZ="Europe/Berlin"', html)
         self.assertIn(PAGE, msg)
+        self.assertIn("refused", msg)
+
+    def test_skills_expect_refusals_on_republish(self):
+        # Issue #8: an in-place republish of a page last published elsewhere is refused (twice) first.
+        skills = tasks.PLUGIN_REPO / "skills"
+        for f in ("setup/SKILL.md", "desk/SKILL.md", "desk-keeper/SKILL.md"):
+            text = " ".join((skills / f).read_text().split())
+            self.assertIn("publish again until it goes through", text, f)
 
     def test_real_template_renders(self):
         out = self.root / "p.html"
@@ -854,16 +1148,41 @@ class CloudSetup(unittest.TestCase):
 
     SCRIPT = Path(__file__).resolve().parents[2] / "cloud-setup.sh"
 
-    def run_script(self, claude_body):
+    def run_script(self, claude_body, url=None, home=None):
         with tempfile.TemporaryDirectory() as d:
+            self.home = Path(home or Path(d) / "home")
             log = Path(d) / "log"
             if claude_body is not None:
                 fake = Path(d) / "claude"
                 fake.write_text(f'#!/bin/sh\necho "$@" >> "{log}"\n{claude_body}\n')
                 fake.chmod(0o755)
-            env = dict(os.environ, PATH=f"{d}:/usr/bin:/bin")
+            env = dict(os.environ, PATH=f"{d}:/usr/bin:/bin", HOME=str(self.home),
+                       DESK_REPO_URL=url or str(Path(d) / "nowhere.git"))
             p = subprocess.run(["sh", str(self.SCRIPT)], env=env, capture_output=True, text=True)
+            if url:
+                self.head = sh(self.home / ".claude" / "desk", "rev-parse", "HEAD")
             return p.returncode, log.read_text().splitlines() if log.exists() else []
+
+    def test_keeps_a_clone_at_a_fixed_place(self):
+        with tempfile.TemporaryDirectory() as d:
+            origin, seed = Path(d) / "origin.git", Path(d) / "seed"
+            sh(d, "init", "-q", "--bare", "-b", "main", str(origin))
+            sh(d, "clone", "-q", str(origin), str(seed))
+            for k, v in (("user.email", "t@t"), ("user.name", "t")):
+                sh(seed, "config", k, v)
+            (seed / "f").write_text("1")
+            sh(seed, "add", "-A")
+            sh(seed, "commit", "-qm", "c")
+            sh(seed, "push", "-q", "origin", "HEAD:main")
+            home = Path(d) / "home"
+            code, calls = self.run_script("exit 0", str(origin), home)  # cloned
+            self.assertEqual((code, len(calls)), (0, 3))
+            self.assertEqual(self.head, sh(seed, "rev-parse", "HEAD"))
+            (seed / "f").write_text("2")
+            sh(seed, "commit", "-qam", "c2")
+            sh(seed, "push", "-q", "origin", "HEAD:main")
+            self.assertEqual(self.run_script("exit 0", str(origin), home)[0], 0)  # pulled
+            self.assertEqual(self.head, sh(seed, "rev-parse", "HEAD"))
 
     def test_installs_from_the_marketplace(self):
         code, calls = self.run_script("exit 0")
