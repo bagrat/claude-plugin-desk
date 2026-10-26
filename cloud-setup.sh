@@ -6,10 +6,24 @@
 #
 # It runs before Claude Code starts, so /desk:note, /desk:feedback and the rest load in that
 # session. Cloud sessions don't install plugins from a repo's .claude/settings.json, and the
-# ones added in the app stay on the computer. A keeper still attaches this repo as a git clone:
-# the installed copy isn't one, so the rule-reload check can't follow it.
+# ones added in the app stay on the computer. It also keeps one clone of the plugin at
+# ~/.claude/desk: the installed copy isn't a clone, and /desk:update and the rule-reload
+# check follow the plugin through that one.
 #
 # Never fails the setup: a session without Desk is better than no session.
+
+DESK_HOME="$HOME/.claude/desk"
+DESK_REPO_URL="${DESK_REPO_URL:-https://github.com/bagrat/claude-plugin-desk}"
+
+if command -v git >/dev/null 2>&1; then
+  if [ -d "$DESK_HOME/.git" ]; then
+    git -C "$DESK_HOME" pull --quiet --ff-only origin main || true
+  else
+    mkdir -p "$(dirname "$DESK_HOME")" && git clone --quiet "$DESK_REPO_URL" "$DESK_HOME" || true
+  fi
+else
+  echo "desk: git not found, no clone at $DESK_HOME" >&2
+fi
 
 if ! command -v claude >/dev/null 2>&1; then
   echo "desk: claude not found, skipping" >&2

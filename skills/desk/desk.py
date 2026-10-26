@@ -28,6 +28,10 @@ COLLECTION = "tasks"
 INBOX = "inbox"
 SETTINGS = "settings"
 PLUGIN_REPO = Path(__file__).resolve().parents[2]
+# The plugin's clone at a fixed place: cloud-setup.sh keeps it, `update` pulls it, and a
+# copy of desk.py that isn't in a clone (a plugin install) follows the rules through it.
+PLUGIN_HOME = Path(os.environ.get("DESK_HOME") or Path.home() / ".claude" / "desk")
+PLUGIN_URL = "https://github.com/bagrat/claude-plugin-desk"
 PLUGIN_ISSUES = "https://github.com/bagrat/claude-plugin-desk/issues/new"
 # The themes the page carries (page/desk.html, THEMES); a test keeps the two lists equal.
 THEMES = ("frost", "moss", "ember", "berry", "plum", "sand", "mauve", "rose", "fern", "wave",
@@ -472,18 +476,18 @@ def image_files_problems(r):
 
 # ---------------------------------------------------------------- rule reload
 
-# What a session holds in its head: when origin/main changes one of these after it read
-# them, it must pull and re-read before its next message (2026-10-25). The plugin's own
-# clone counts too: its skills, commands and page are rules, and a new page means the
-# keeper republishes its Desk.
+# What a session holds in its head: when a clone's HEAD changed one of these after it read
+# them, it must re-read before its next message (2026-10-25). The plugin's own clone counts
+# too: its skills, commands and page are rules, and a new page means the keeper republishes
+# its Desk. prep never fetches (2026-10-26): `update` pulls the plugin, and any pull counts.
 RULE_PATHS = ("CLAUDE.md", "memory/MEMORY.md", ".claude/skills", ".claude/desk.json",
               "skills", "page/desk.html")
 PAGE_PATH = "page/desk.html"
 LOADED = Path(os.environ.get("DESK_LOADED") or Path.home() / ".cache" / "desk" / "loaded.json")
-FETCH_SECONDS = 20
+PULL_SECONDS = 60
 
 
-def git(repo, *args, timeout=FETCH_SECONDS):
+def git(repo, *args, timeout=PULL_SECONDS):
     r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=timeout)
     if r.returncode:
         raise RuntimeError(((r.stderr or r.stdout).strip().splitlines() or ["git failed"])[-1])
@@ -497,15 +501,23 @@ def git_root(path):
         return None
 
 
+def plugin_clone():
+    """The plugin's clone: the one this script runs from, else ~/.claude/desk, else None."""
+    for c in (PLUGIN_REPO, PLUGIN_HOME):
+        if (Path(c) / ".git").exists():
+            return Path(c)
+    return None
+
+
 def rule_repos(given=None):
-    """The project's clone (where desk.json sits), the plugin's own clone, and the clones
-    desk.json names under "watch" that exist here. A copy that isn't a git clone is skipped."""
+    """The project's clone (where desk.json sits), the plugin's clone (plugin_clone), and the
+    clones desk.json names under "watch" that exist here."""
     if given:
         return [Path(g) for g in given]
     cands = []
     if CONFIG_PATH:
         cands.append(git_root(CONFIG_PATH.parent))
-    cands.append(git_root(PLUGIN_REPO) if (PLUGIN_REPO / ".git").exists() else None)
+    cands.append(plugin_clone())
     cands += [Path(w) for w in CONFIG.get("watch") or [] if (Path(w) / ".git").exists()]
     out, seen = [], set()
     for c in cands:
@@ -522,24 +534,19 @@ def load_loaded(path):
         return {}
 
 
-def reload_check(repos, state_path, fetch=True):
-    """(stale, warnings): stale is [(repo, files, loaded, head)] for each repo whose
-    origin/main changed a rule file since it was loaded. A failed fetch only warns."""
+def reload_check(repos, state_path):
+    """(stale, warnings): stale is [(repo, files, loaded, head)] for each repo whose HEAD
+    changed a rule file since it was loaded. No network: it only reads the clones."""
     loaded, stale, warns = load_loaded(state_path), [], []
     for repo in repos:
         key = str(Path(repo).resolve())
-        if fetch:
-            try:
-                git(repo, "fetch", "--quiet", "origin", "main")
-            except (RuntimeError, subprocess.TimeoutExpired, OSError) as e:
-                warns.append(f"{repo}: fetch failed, judged on the last fetch ({e})")
         try:
-            head = git(repo, "rev-parse", "origin/main")
-        except (RuntimeError, OSError) as e:
-            warns.append(f"{repo}: no origin/main, not checked ({e})")
+            head = git(repo, "rev-parse", "HEAD")
+        except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
+            warns.append(f"{repo}: no HEAD, not checked ({e})")
             continue
         # Nothing recorded yet: what's checked out is what the session read at start.
-        base = loaded.get(key) or git(repo, "rev-parse", "HEAD")
+        base = loaded.get(key) or head
         if not loaded.get(key):
             warns.append(f"{repo}: nothing marked loaded; taking HEAD {base[:7]} (run `loaded` after reading)")
         if base == head:
@@ -568,6 +575,34 @@ def mark_loaded(repos, state_path):
     Path(state_path).parent.mkdir(parents=True, exist_ok=True)
     Path(state_path).write_text(json.dumps(state, indent=2) + "\n")
     return state, warns
+
+
+def pull_plugin(home, url=PLUGIN_URL):
+    """Clone the plugin to home, or pull it there. Returns (before, after, warnings)."""
+    home = Path(home)
+    try:
+        if not (home / ".git").exists():
+            home.parent.mkdir(parents=True, exist_ok=True)
+            r = subprocess.run(["git", "clone", "--quiet", str(url), str(home)],
+                               capture_output=True, text=True, timeout=PULL_SECONDS)
+            if r.returncode:
+                raise RuntimeError(((r.stderr or r.stdout).strip().splitlines() or ["git clone failed"])[-1])
+            return None, git(home, "rev-parse", "HEAD"), []
+        before = git(home, "rev-parse", "HEAD")
+        git(home, "pull", "--quiet", "--ff-only", "origin", "main")
+        return before, git(home, "rev-parse", "HEAD"), []
+    except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
+        head = git(home, "rev-parse", "HEAD") if (home / ".git").exists() else None
+        return head, head, [f"{home}: pull failed, judged on what's there ({e})"]
+
+
+def print_stale(stale):
+    """What to re-read, and whether the page must be republished."""
+    for repo, files, base, head in stale:
+        print(f"  {repo} ({base[:7]} -> {head[:7]}): {', '.join(files)}")
+    if any(PAGE_PATH in files for _, files, _, _ in stale):
+        print(f"The page changed too: republish the Desk in place "
+              f"(python3 {Path(__file__).name} page --out <file>, then Artifact publish to its url).")
 
 
 # ---------------------------------------------------------------- patches
@@ -977,7 +1012,7 @@ def cmd_look(a):
 
 def cmd_page(a):
     """The page to publish: the template with this Desk's title, keeper and first look."""
-    tpl = Path(a.template) if a.template else PLUGIN_REPO / PAGE_PATH
+    tpl = Path(a.template) if a.template else (plugin_clone() or PLUGIN_REPO) / PAGE_PATH
     html = render_page(tpl.read_text(), CONFIG)
     Path(a.out).write_text(html)
     print(f"wrote {a.out} for {CONFIG.get('title') or 'Desk'}"
@@ -1133,19 +1168,15 @@ def cmd_images(a):
 
 def cmd_prep(a):
     """Rule 12, before every message: the rules still current, the checks, the deck, the footer."""
-    if not a.no_fetch_rules:
+    if not a.no_rules:
         stale, warns = reload_check(rule_repos(a.repo), a.state)
         for w in warns:
             print(f"warning: {w}", file=sys.stderr)
         if stale:
             print("Stop: the rules changed since you loaded them. Reload before this message:")
-            for repo, files, base, head in stale:
-                print(f"  {repo} ({base[:7]} -> {head[:7]}): {', '.join(files)}")
-            if any(PAGE_PATH in files for _, files, _, _ in stale):
-                print(f"The page changed too: after pulling, republish the Desk in place "
-                      f"(python3 {Path(__file__).name} page --out <file>, then Artifact publish to its url).")
-            print(f"Then: git -C <clone> pull origin main, re-read each file above (load the changed skills "
-                  f"again), and run: python3 {Path(__file__).name} loaded")
+            print_stale(stale)
+            print(f"Then re-read each file above (load the changed skills again) and run: "
+                  f"python3 {Path(__file__).name} loaded. (/desk:update does all of it.)")
             return 1
     code = cmd_check(a)
     notes = load_inbox(a.rows)
@@ -1169,6 +1200,28 @@ def cmd_loaded(a):
     return 1 if warns else 0
 
 
+def cmd_update(a):
+    """/desk:update: pull the plugin's clone, then name what to re-read (exit 1 when any)."""
+    before, after, warns = pull_plugin(a.home, a.url)
+    repos = rule_repos(a.repo)
+    if Path(a.home).resolve() not in {Path(r).resolve() for r in repos} and (Path(a.home) / ".git").exists():
+        repos.append(Path(a.home))
+    stale, more = reload_check(repos, a.state)
+    for w in warns + more:
+        print(f"warning: {w}", file=sys.stderr)
+    if before is None and after:
+        print(f"cloned {a.home} at {after[:7]}")
+    elif after and before != after:
+        print(f"pulled {a.home}: {before[:7]} -> {after[:7]}")
+    if not stale:
+        print(f"Desk is current at {(after or '?')[:7]}: nothing to re-read.")
+        return 0
+    print("Re-read these (load the changed skills again):")
+    print_stale(stale)
+    print(f"Then run: python3 {Path(__file__).name} loaded, and tell the owner in one line what changed.")
+    return 1
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="desk.py", description=__doc__.split("\n")[0])
     p.add_argument("--desk", help="the Desk's desk.json (default: the nearest .claude/desk.json, or $DESK_CONFIG)")
@@ -1181,6 +1234,11 @@ def main(argv=None):
     s = sub.add_parser("loaded", help="mark the rules reloaded: after pulling and re-reading them")
     rules_args(s)
     s.set_defaults(fn=cmd_loaded)
+    s = sub.add_parser("update", help="/desk:update: pull the plugin's clone, then name what to re-read")
+    rules_args(s)
+    s.add_argument("--home", default=str(PLUGIN_HOME), help="the plugin's clone (default: ~/.claude/desk)")
+    s.add_argument("--url", default=PLUGIN_URL, help="where to clone it from when it's missing")
+    s.set_defaults(fn=cmd_update)
 
     def cmd(name, fn, help):
         s = sub.add_parser(name, help=help)
@@ -1196,7 +1254,8 @@ def main(argv=None):
         s.add_argument("--stale-hours", type=float, default=12)
         if name == "prep":
             rules_args(s)
-            s.add_argument("--no-fetch-rules", action="store_true", help="skip the rule-reload check")
+            s.add_argument("--no-rules", "--no-fetch-rules", dest="no_rules", action="store_true",
+                           help="skip the rule-reload check")
     cmd("footer", cmd_footer, "the footer line")
     cmd("order", cmd_order, "the order the page shows")
     cmd("sessions", cmd_sessions, "the sessions behind open cards, to check one by one")
