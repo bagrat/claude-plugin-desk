@@ -51,7 +51,7 @@ directory; `--desk FILE` (before the command) or `$DESK_CONFIG` names another.
 | `python3 $S footer $R` | The footer line, exactly; refuses a dump older than 2 minutes, like `prep`. |
 | `python3 $S order $R` | News, then the waiting deck as the page shows it, then Later and In progress. |
 | `python3 $S rank $R` | Re-rank waiting cards by rule 7. |
-| `python3 $S move $R <id> news\|working\|waiting\|done [--context …] [--ask … --recommend … --ifnone …] [--kind K] [--link "Label=url"] [--note …] [--settled "…"] [--session "Label=url"] [--active] [--if-version N]` | The patch for a move. |
+| `python3 $S move $R <id> news\|working\|waiting\|held\|done [--context …] [--ask … --recommend … --ifnone …] [--kind K] [--link "Label=url"] [--note …] [--settled "…"] [--session "Label=url"] [--active] [--if-version N]` | The patch for a move. |
 | `python3 $S pushed $R <id> […]` | After the push for new waiting cards (rule 13): sets each card's `pushedAt`. |
 | `python3 $S dep $R <id> "<item>" done\|building\|open [--card ID] [--add]` | One `dependsOn` item by hand. |
 | `python3 $S images $R <id> --top\|--fold N [--image ID=caption …] [--json f] [--drop-top]` | A card's or a fold's images, plus `delete_assets`: ids no longer used on the card. |
@@ -75,6 +75,11 @@ What the script does by itself:
   recommendation (a `step` needs no recommendation but its `--link`), and without a new `--ask`
   when the old one was answered. `--kind` sets the kind; `--link` puts a link first in `links`. `--settled` puts a
   "Settled so far" fold at the top.
+- `move … held` keeps the card waiting but holds it under Later until the owner asks for it
+  (`heldAt`): out of the deck, the footer's count and the ranks, no push, never flagged for
+  its age. It refuses without an ask and a recommendation, like `waiting`. `move … waiting`
+  brings it back: it drops `heldAt`, sets `activeAt` and `pushedAt` (they asked; no push is
+  due). Any other move drops the hold.
 - `move … working` sets `workingSince`; `--session` adds a session first in `sessions`.
 - `move … news` drops the ask, recommendation, answers and what only a deck card uses, keeps
   the folds and images, and refuses an `--ask`.
@@ -139,7 +144,7 @@ it.
    what's settled goes in a "Settled so far" fold at the top (`move … waiting --settled`).
 6. **Order.** News has its own tab, first. In Waiting: the card being discussed, for 3 hours
    after it was last discussed (`--active`), latest first; then by rank. Snoozed cards wait
-   under Later.
+   under Later, and so do held ones (rule 10), marked "review when you ask".
 7. **Rank.** Blocking or time-sensitive first, then reviews, then decisions, then checks by
    hand. A card can be bumped by hand: the rank you want and `rankByHand: true`.
 8. **The footer.** Every message to the owner ends with a horizontal rule, then one link:
@@ -154,7 +159,11 @@ it.
     (2026-10-26): its ask is the step, its link is first in `links` and shows as the card's main
     button, and 👍 reads **Done** and reports "Done." (to In progress, where you check it took).
     Never put such a step behind "Go with the recommended": that tells you it's done before it
-    is. On news, one button, **Seen**, which deletes the row
+    is. **Held until you ask** (2026-10-26): a review the owner isn't ready for (they say so, in the chat or by 💬) is held with `move … held`, not
+    snoozed day after day: it stays under Later, with no push and no ranking pressure, until they
+    ask for it. Then it comes back to Waiting (`move … waiting`), and the keeper sends the
+    card's images into the chat as files (SendUserFile), one per image with its caption, so
+    they can review on the phone, not only a link to the page. On news, one button, **Seen**, which deletes the row
     (where it can't, it sets `done` and you delete it); it wakes no one.
 11. **One writer.** Only the keeper writes cards; other sessions report to it. The one write
     anyone else makes is a note into the Inbox (rule 15).
@@ -200,7 +209,7 @@ that watch. On a wake: read the thread, act, reply in one line, resolve it, upda
 rankByHand, kind (decide | review | check | do | step | info; `step`: rule 10), handle, title, context, details
 `[{title, text, images?}]`, images `[{id, caption, file?}]` (served at `/_blob/<id>`), ask,
 recommend, ifNone, blocks, links `[{label, url}]`, sessions `[{label, url}]`, since, updatedAt,
-activeAt, snoozeUntil, pushedAt, answer, answeredAt, quick, quickAt, answerSent, workingSince,
+activeAt, snoozeUntil, heldAt, pushedAt, answer, answeredAt, quick, quickAt, answerSent, workingSince,
 note, dependsOn `[{item, card?, state}]` (done | building | open); scheduled rows also `when`.
 
 **inbox**: text, from (`page`, a session link, `chat`), at, images? `[{id, caption}]`.
