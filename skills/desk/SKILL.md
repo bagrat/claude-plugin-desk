@@ -51,7 +51,7 @@ directory; `--desk FILE` (before the command) or `$DESK_CONFIG` names another.
 | `python3 $S footer $R` | The footer line, exactly; refuses a dump older than 2 minutes, like `prep`. |
 | `python3 $S order $R` | News, then the waiting deck as the page shows it, then Later and In progress. |
 | `python3 $S rank $R` | Re-rank waiting cards by rule 7. |
-| `python3 $S move $R <id> news\|working\|waiting\|done [--context …] [--ask … --recommend … --ifnone …] [--note …] [--settled "…"] [--session "Label=url"] [--active] [--if-version N]` | The patch for a move. |
+| `python3 $S move $R <id> news\|working\|waiting\|done [--context …] [--ask … --recommend … --ifnone …] [--kind K] [--link "Label=url"] [--note …] [--settled "…"] [--session "Label=url"] [--active] [--if-version N]` | The patch for a move. |
 | `python3 $S pushed $R <id> […]` | After the push for new waiting cards (rule 13): sets each card's `pushedAt`. |
 | `python3 $S dep $R <id> "<item>" done\|building\|open [--card ID] [--add]` | One `dependsOn` item by hand. |
 | `python3 $S images $R <id> --top\|--fold N [--image ID=caption …] [--json f] [--drop-top]` | A card's or a fold's images, plus `delete_assets`: ids no longer used on the card. |
@@ -70,7 +70,8 @@ What the script does by itself:
 
 - `move … waiting` drops the answer fields, `workingSince`, `snoozeUntil`, `pushedAt` (so it
   gets its push) and, unless you give `--note`, `note`. It refuses without an ask and a
-  recommendation, and without a new `--ask` when the old one was answered. `--settled` puts a
+  recommendation (a `step` needs no recommendation but its `--link`), and without a new `--ask`
+  when the old one was answered. `--kind` sets the kind; `--link` puts a link first in `links`. `--settled` puts a
   "Settled so far" fold at the top.
 - `move … working` sets `workingSince`; `--session` adds a session first in `sessions`.
 - `move … news` drops the ask, recommendation, answers and what only a deck card uses, keeps
@@ -126,7 +127,7 @@ it.
    `dependsOn` (linked by `card` when the item is a card).
 3. **A card holds everything.** A short summary on top, the longer parts in folds (`details`);
    never "see the chat": the owner swipes cards and can't find things back in the chat. Every
-   waiting card has an ask and a recommendation.
+   waiting card has an ask and a recommendation (a `step` has its link instead, rule 10).
 4. **Images, with folds.** New images go on the card in the same turn, uploaded to the page's
    asset store (Artifact publish, `asset: true`, the page's url), superseded ones replaced and
    deleted. A link alone isn't enough. A card split into folds carries each fold's images beside
@@ -146,7 +147,12 @@ it.
    its recap (`move … news --context …`). Anything to try by hand stays a Waiting card (kind
    `check`). Otherwise the card closes on their answer (`move … done`).
 10. **The buttons.** On a Waiting card: 👍 go with the recommended (to In progress), ⏭ back
-    tomorrow at 9:00, 💬 say it in the chat. On news, one button, **Seen**, which deletes the row
+    tomorrow at 9:00, 💬 say it in the chat. **A step only the owner can do off the page** (open a
+    link and submit it, sign in somewhere, press a button on another site) is kind `step`
+    (2026-10-26): its ask is the step, its link is first in `links` and shows as the card's main
+    button, and 👍 reads **Done** and reports "Done." (to In progress, where you check it took).
+    Never put such a step behind "Go with the recommended": that tells you it's done before it
+    is. On news, one button, **Seen**, which deletes the row
     (where it can't, it sets `done` and you delete it); it wakes no one.
 11. **One writer.** Only the keeper writes cards; other sessions report to it. The one write
     anyone else makes is a note into the Inbox (rule 15).
@@ -189,7 +195,7 @@ that watch. On a wake: read the thread, act, reply in one line, resolve it, upda
 ## Row fields
 
 **tasks**: state (news | waiting | working | scheduled; `done` only from the page), rank,
-rankByHand, kind (decide | review | check | do | info), handle, title, context, details
+rankByHand, kind (decide | review | check | do | step | info; `step`: rule 10), handle, title, context, details
 `[{title, text, images?}]`, images `[{id, caption, file?}]` (served at `/_blob/<id>`), ask,
 recommend, ifNone, blocks, links `[{label, url}]`, sessions `[{label, url}]`, since, updatedAt,
 activeAt, snoozeUntil, pushedAt, answer, answeredAt, quick, quickAt, answerSent, workingSince,

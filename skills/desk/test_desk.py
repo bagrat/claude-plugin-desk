@@ -385,6 +385,51 @@ class Move(Base):
         self.assertFalse((self.dir / "a.json").exists())
 
 
+class Steps(Base):
+    """Rule 10: a step only the owner can do off the page (kind step): its link is the main button."""
+    LINK = "https://example.test/form"
+
+    def test_do_card_needs_its_link(self):
+        self.put("a", waiting(kind="step", ask="Submit the form.", recommend=None))
+        m, = self.msgs("a")
+        self.assertIn("link", m)
+        self.assertIn("rule 10", m)
+
+    def test_do_card_with_link_needs_no_recommendation(self):
+        self.put("a", waiting(kind="step", ask="Submit the form.", recommend=None,
+                              links=[{"label": "Open the form", "url": self.LINK}]))
+        self.assertEqual(self.msgs("a"), [])
+
+    def test_move_waiting_as_a_step(self):
+        self.put("a", working(), version=2)
+        code, out, err = self.run_cli("move", self.dir, "a", "waiting", "--now", NOW, "--kind", "step",
+                                      "--ask", "Submit the form.", "--link", f"Open the form={self.LINK}")
+        self.assertEqual(code, 0, err)
+        patch = json.loads(Path(json.loads(out)[0]["file_path"]).read_text())
+        self.assertEqual(patch["kind"], "step")
+        self.assertEqual(patch["links"][0], {"label": "Open the form", "url": self.LINK})
+
+    def test_link_goes_first_once(self):
+        self.put("a", working(links=[{"label": "Docs", "url": "https://example.test/docs"},
+                                     {"label": "Old", "url": self.LINK}]))
+        _, out, _ = self.run_cli("move", self.dir, "a", "waiting", "--now", NOW, "--kind", "step",
+                                 "--ask", "Submit it.", "--link", f"Open the form={self.LINK}")
+        patch = json.loads(Path(json.loads(out)[0]["file_path"]).read_text())
+        self.assertEqual([l["url"] for l in patch["links"]], [self.LINK, "https://example.test/docs"])
+
+    def test_a_do_card_is_still_work(self):
+        self.put("a", working())
+        code, _, err = self.run_cli("move", self.dir, "a", "waiting", "--now", NOW, "--ask", "Q?", "--recommend", "Yes.")
+        self.assertEqual(code, 0, err)
+
+    def test_move_refuses_a_step_without_a_link(self):
+        self.put("a", working())
+        code, _, err = self.run_cli("move", self.dir, "a", "waiting", "--now", NOW, "--kind", "step",
+                                    "--ask", "Submit the form.")
+        self.assertEqual(code, 2)
+        self.assertIn("--link", err)
+
+
 class Pushes(Base):
     """Rule 13: a new waiting card gets a push."""
 
