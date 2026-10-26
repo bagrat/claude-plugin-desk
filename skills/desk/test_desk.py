@@ -204,6 +204,38 @@ class Checks(Base):
         self.assertTrue(any("details[0] points at the chat" in m for m in self.msgs("b")))
         self.assertEqual(self.msgs("c"), [])
 
+    def test_question_to_owner_in_a_note_or_fold(self):
+        # Issue 25: a question parked in an in-progress card's note never reaches Waiting.
+        self.put("a", working(note="Two questions for you: (1) Do X? Recommended: yes. (2) Do Y? Recommended: yes."))
+        self.put("b", {"state": "scheduled", "kind": "do", "title": "L", "when": "the release",
+                       "details": [{"title": "Open", "text": "Your call: ship it Friday or Monday?"}]})
+        self.put("c", working(context="Should we keep the old flag, or drop it?"))
+        self.put("d", working(note="Tests pass; waiting on CI."))
+        self.put("e", working(details=[{"title": "Settled so far", "text": "Ship Friday? Recommended: yes. Answer: yes."}]))
+        self.put("f", working(note='Never write "your call" in a note.'))
+        s = {"session_01AAAA": "working"}
+        self.assertTrue(any("note asks the owner" in m and "move a waiting" in m for m in self.msgs("a", s)))
+        self.assertTrue(any("details[0] asks the owner" in m for m in self.msgs("b", s)))
+        self.assertTrue(any("context asks the owner" in m for m in self.msgs("c", s)))
+        for rid in "def":
+            self.assertEqual(self.msgs(rid, s), [], rid)
+
+    def test_prep_message_flags_questions_on_no_card(self):
+        self.put("a", waiting(ask="Merge the price box change now?", recommend="Yes, merge it."))
+        draft = self.root / "draft.md"
+        draft.write_text("Done with the menu.\n\n1. Merge the price box change now?\n"
+                         "2. Rename the export button to Download?\nRecommended: rename it, it reads clearer.\n")
+        code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-rules", "--message", draft)
+        self.assertEqual(code, 1, out)
+        self.assertIn("Rename the export button", out)
+        self.assertNotIn("“Merge the price box", out)
+        self.assertIn("rename it, it reads clearer", out)
+        self.assertNotIn("check: ok", out)
+        draft.write_text("All set: the menu shipped.\n")
+        code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-rules", "--message", draft)
+        self.assertEqual(code, 0, out)
+        self.assertIn("check: ok", out)
+
     def test_same_handle_twice(self):
         self.put("a", waiting(handle="Price box"))
         self.put("b", working(handle="price box"))

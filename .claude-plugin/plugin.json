@@ -1,6 +1,6 @@
 {
   "name": "desk",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "A Desk per project: one private page that keeps you informed and holds what needs you (news, what waits on you, what's in progress, your notes), kept by one Claude session.",
   "author": { "name": "Bagrat Aznauryan" },
   "homepage": "https://github.com/bagrat/claude-plugin-desk",

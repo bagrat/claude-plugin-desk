@@ -34,7 +34,9 @@ owner may have cleared news since):
    A note that is feedback on Desk itself (not this project) goes the `feedback` skill's way.
 4. Make this turn's changes with `move`, `images`, `rank`, `dep`, and send the entries they
    print with ArtifactData `update` / `delete` / `batch`, pinned to the versions from step 1.
-5. `python3 $S prep <dir> --sessions <scratch>/sessions.json`. When it stops with "the rules
+5. `python3 $S prep <dir> --sessions <scratch>/sessions.json --message <scratch>/draft.md`,
+   the draft written first when it asks the owner anything: each question in it must be a
+   Waiting card's ask, never a card's note (rule 1). When it stops with "the rules
    changed", re-read each file it lists, republish the page if it says the page changed (on a
    refusal that hands back the live page, merge onto it and publish again until it goes
    through), run `loaded`, and run `prep` again. When it stops with "rows read N min ago",

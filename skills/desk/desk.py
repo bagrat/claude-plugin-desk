@@ -61,6 +61,15 @@ CHAT = re.compile(
     r"|as (i|we) (said|discussed|mentioned)( above| earlier)?",
     re.I,
 )
+# Rule 1: words that put a question to the owner. On a card not Waiting, no ask holds it.
+OWNER_ASK = re.compile(
+    r"\b(your call|yours to \w+|(it's|it is|that's|now) yours|up to you|you decide|for you to \w+"
+    r"|questions? (for|to) (you|the owner)|(waits?|waiting) (on|for) (you|the owner)"
+    r")\b|\b(recommended|recommendation)\s*:",
+    re.I,
+)
+# A question aimed at the owner: a sentence ending in "?" that speaks to them.
+OWNER_Q = re.compile(r"[^.!?\n]*\b(you|your|should we|shall we|should i|shall i|ok to|okay to)\b[^.!?\n]*\?", re.I)
 SUPERSEDED = re.compile(r"\b(superseded|replaced|dropped|withdrawn|obsolete|no longer)\b|^\s*(old|was)\b|~~", re.I)
 IMAGE_FILE = re.compile(r"[\w.-]+\.(?:png|jpe?g|webp|gif)\b", re.I)
 SESSION = re.compile(r"session_[A-Za-z0-9]+")
@@ -379,6 +388,11 @@ def check(rows, now, sessions=None, stale_hours=12):
             if last and now - last > timedelta(hours=stale_hours):
                 say(r, f"working and untouched for {int((now - last).total_seconds() // 3600)} h")
 
+        if st in ("working", "scheduled"):
+            for field, t in owner_asks(r):
+                say(r, f"{field} asks the owner something (“{short(t, 60)}”): a question to them is never "
+                       f"a note; move {r.id} waiting --ask … --recommend …, with it as its ask (rule 1)")
+
         if st in ("waiting", "working", "news"):
             for field, t in texts(r):
                 m = next((m for m in CHAT.finditer(t) if not quoted(t, m)), None)
@@ -409,6 +423,49 @@ def check(rows, now, sessions=None, stale_hours=12):
                 for c, o in ((a, b), (b, a)):
                     if c.get("kind") == "close":
                         out.append((c.id, f"a wrap-up while {o.id} on the same task is open (rule 9)"))
+    return out
+
+
+def owner_asks(r):
+    """The note, context and folds (but the settled one) that put a question to the owner."""
+    d = r.data
+    fields = [(k, d[k]) for k in ("context", "note") if isinstance(d.get(k), str)]
+    fields += [(f"details[{i}]", f"{f.get('title', '')}\n{f.get('text', '')}")
+               for i, f in enumerate(d.get("details") or []) if f.get("title") != "Settled so far"]
+    for field, t in fields:
+        m = next((m for m in OWNER_ASK.finditer(t) if not quoted(t, m)), None) or OWNER_Q.search(t)
+        if m:
+            yield field, m.group(0).strip()
+
+
+def words(text):
+    return {w for w in re.findall(r"\w+", str(text or "").lower()) if len(w) > 3}
+
+
+def message_asks(text):
+    """A draft's numbered questions and its "Recommended:" lines."""
+    out = []
+    for line in text.splitlines():
+        for part in re.split(r"(?=\(\d+\)\s)", line):
+            m = re.match(r"\s*(?:\(?\d+[.)]\s+|[-*]\s+)?\**(?:recommended|recommendation)\s*:\**\s*(.+)", part, re.I)
+            if m:
+                out.append(m.group(1).strip())
+                continue
+            m = re.match(r"\s*(?:\d+[.)]|\(\d+\))\s+([^?]*\?)(?:.*?\brecommended\s*:\s*(.+))?", part, re.I)
+            if m:
+                out += [g.strip() for g in m.groups() if g]
+    return out
+
+
+def unheld_asks(text, rows):
+    """Rule 1: each question and recommendation in the draft that no Waiting card holds."""
+    held = [words(" ".join(str(r.get(k) or "") for k in ("title", "ask", "recommend", "ifNone")))
+            for r in by_state(rows, "waiting")]
+    out = []
+    for q in message_asks(text):
+        w = words(q)
+        if w and not any(len(w & h) / len(w) >= 0.6 for h in held):
+            out.append(q)
     return out
 
 
@@ -1214,6 +1271,10 @@ def cmd_prep(a):
         print(late)
         return 1
     code = cmd_check(a)
+    if a.message:
+        for q in unheld_asks(Path(a.message).read_text(), load_rows(a.rows)):
+            print(f"message: “{short(q)}” is on no Waiting card: put it on its card's ask (rule 1)")
+            code = 1
     notes = load_inbox(a.rows)
     for n in notes:
         print(f"inbox {n.id}: sort this note into a card, then `sorted` (rule 15): {short(n.get('text'))}")
@@ -1293,6 +1354,7 @@ def main(argv=None):
                            help="skip the rule-reload check")
             s.add_argument("--max-age", type=float, default=READ_MINUTES,
                            help=f"refuse rows read longer ago than this, in minutes (default {READ_MINUTES})")
+            s.add_argument("--message", help="the draft about to go out: flag its questions no Waiting card holds")
     s = cmd("footer", cmd_footer, "the footer line")
     s.add_argument("--max-age", type=float, default=READ_MINUTES,
                    help=f"refuse rows read longer ago than this, in minutes (default {READ_MINUTES})")

@@ -44,7 +44,7 @@ directory; `--desk FILE` (before the command) or `$DESK_CONFIG` names another.
 | Command | What |
 | --- | --- |
 | `python3 $S sessions $R` | The sessions behind open cards, one per line, to check one by one (`get_session`). |
-| `python3 $S prep $R --sessions sessions.json` | **Before every message.** The rule-reload check, the checks, the notes to sort, the deck in the page's order, the footer. Exit 1 when anything is left to do. Refuses rows read more than 2 minutes ago (`--max-age MIN`). |
+| `python3 $S prep $R --sessions sessions.json [--message draft.md]` | **Before every message.** The rule-reload check, the checks, the notes to sort, the deck in the page's order, the footer. With `--message`, each numbered question or "Recommended:" line in the draft that no Waiting card holds. Exit 1 when anything is left to do. Refuses rows read more than 2 minutes ago (`--max-age MIN`). |
 | `python3 $S loaded` | Mark the rules reloaded, after you've re-read what `prep` or `update` named. |
 | `python3 $S update` | `/desk:update`: pull the plugin's clone at `~/.claude/desk` (clone it if missing) and name what changed since you loaded it. Exit 1 when there's something to re-read. |
 | `python3 $S check $R [--sessions …] [--stale-hours 12]` | The checks alone. |
@@ -109,7 +109,9 @@ it.
    a session waiting on its own CI counts. Later (scheduled, with its `when`) once the work is
    done and only held for an event that isn't theirs (a release, another PR), or parked until
    a date. A card's ask is always the one question waiting on them now; on a walkthrough, the
-   current step. **Every question put to them in the chat lands on a card in the same turn.**
+   current step. **Every question put to them in the chat lands on a card in the same turn**,
+   as a Waiting card's ask: never in an In-progress or Later card's `note`, `context` or folds
+   (`check` flags those; `prep --message <draft>` flags a question in the draft no card holds).
 2. **One card per task.** Before adding or changing a card, read every waiting and in-progress
    card. A new question about a task goes into its card, never a second card. A card a newer
    step makes pointless is reworked or deleted. A card that waits on others lists them in
