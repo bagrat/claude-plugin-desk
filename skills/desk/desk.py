@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -947,6 +948,16 @@ def cmd_note(a):
     return 0
 
 
+def look_out(current):
+    """Where look.json goes without --out: beside the rows, like the patches; never the cwd,
+    which is usually a project's repo."""
+    if not current:
+        return Path(tempfile.mkdtemp(prefix="desk-look-"))
+    d = Path(current).resolve().parent
+    # ArtifactData writes <out_dir>/settings/look.json; the patches go to <out_dir>/patches.
+    return (d.parent if d.name == SETTINGS else d) / "patches"
+
+
 def cmd_look(a):
     """Rule 16: the Desk's theme and icon, kept in its settings/look row."""
     cur = json.loads(Path(a.current).read_text()) if a.current else None
@@ -956,7 +967,7 @@ def cmd_look(a):
         print("\n".join(THEMES))
         return 0
     doc = look_doc(a.theme, a.emoji, a.image, a.letter, cur)
-    out = Path(a.out)
+    out = Path(a.out) if a.out else look_out(a.current)
     out.mkdir(parents=True, exist_ok=True)
     f = out / "look.json"
     f.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n")
@@ -1250,7 +1261,8 @@ def main(argv=None):
     g.add_argument("--letter", help="one or two letters on the accent")
     s.add_argument("--current", help="the settings/look row as read, to change only what's given")
     s.add_argument("--list", action="store_true", help="list the themes")
-    s.add_argument("--out", default=".", help="the directory for look.json")
+    s.add_argument("--out", help="the directory for look.json (default: beside --current's rows, "
+                   "in patches/; without --current, a new temp directory)")
     s.set_defaults(fn=cmd_look)
 
     s = sub.add_parser("page", help="the page to publish, for this Desk")

@@ -743,6 +743,27 @@ class DeskTests(Base):
         with self.assertRaises(SystemExit):
             self.run_cli("look", "--image", "not-an-id", "--out", self.root)
 
+    def test_look_never_writes_into_the_cwd(self):
+        repo = self.root / "repo"
+        repo.mkdir()
+        old = os.getcwd()
+        os.chdir(repo)
+        try:
+            code, out, _ = self.run_cli("look", "--theme", "plum", "--emoji", "🗂️")
+            self.assertEqual(code, 0)
+            self.assertEqual(list(repo.iterdir()), [])
+            f = Path(json.loads(out)["file_path"])
+            self.assertEqual(json.loads(f.read_text())["theme"], "plum")
+            # Given the row as read, it writes beside the rows, like the patches.
+            dump = self.root / "look" / "settings"
+            dump.mkdir(parents=True)
+            (dump / "look.json").write_text(json.dumps({"id": "look", "data": {"theme": "plum"}, "version": 1}))
+            code, out, _ = self.run_cli("look", "--letter", "D", "--current", dump / "look.json")
+            self.assertEqual(Path(json.loads(out)["file_path"]), (self.root / "look" / "patches" / "look.json").resolve())
+            self.assertEqual(list(repo.iterdir()), [])
+        finally:
+            os.chdir(old)
+
     def test_themes_match_the_page(self):
         html = (tasks.PLUGIN_REPO / "page" / "desk.html").read_text()
         m = re.search(r"const THEMES = \{(.*?)\n\};", html, re.S)
