@@ -970,7 +970,8 @@ def cmd_page(a):
     html = render_page(tpl.read_text(), CONFIG)
     Path(a.out).write_text(html)
     print(f"wrote {a.out} for {CONFIG.get('title') or 'Desk'}"
-          + (f": publish it to {PAGE}" if PAGE else ": publish it as a new artifact, then put its url in desk.json"))
+          + (f": publish it to {PAGE}; when a publish is refused and hands back the live page, merge"
+             " onto it and publish again until it goes through (the first switch is often refused twice)" if PAGE else ": publish it as a new artifact, then put its url in desk.json"))
     return 0
 
 
