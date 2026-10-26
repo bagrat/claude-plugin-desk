@@ -27,6 +27,7 @@ body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--f-ui); }
 body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
 .wrap { max-width: 720px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 0 48px; }
 a { color: var(--accent); }
+a.bare { overflow-wrap: anywhere; }
 a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
 [hidden] { display: none !important; }
 
@@ -272,13 +273,15 @@ const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls)
 const btn = (cls, text) => { const b = el("button", cls, text); b.type = "button"; return b; };
 const safeUrl = (u) => { try { const x = new URL(u); return x.protocol === "https:" ? x.href : null; } catch { return null; } };
 
-// Inline markup in stored text: **bold** and [label](https://…), built with text nodes only.
+// Inline markup in stored text: **bold**, [label](https://…) and bare https:// links (a
+// trailing period or comma stays text), built with text nodes only.
 function inline(parent, text) {
-  const re = /\*\*([^*]+)\*\*|\[([^\]]+)\]\((https:[^)\s]+)\)/g; let last = 0, m;
+  const re = /\*\*([^*]+)\*\*|\[([^\]]+)\]\((https:[^)\s]+)\)|(https:\/\/[^\s<>"]*[^\s<>".,;:!?)\]'’”])/g; let last = 0, m;
   const s = String(text ?? "");
   while ((m = re.exec(s))) {
     if (m.index > last) parent.append(s.slice(last, m.index));
-    if (m[1]) parent.append(el("b", null, m[1]));
+    if (m[1]) parent.append(inline(el("b"), m[1]));
+    else if (m[4]) { const href = safeUrl(m[4]); parent.append(href ? linkTo(el("a", "bare", m[4]), href) : m[4]); }
     else { const href = safeUrl(m[3]); if (href) parent.append(linkTo(el("a", null, m[2]), href)); else parent.append(m[2]); }
     last = re.lastIndex;
   }
@@ -442,7 +445,7 @@ async function answer(id, t, kind, text, card) {
 // The microphone: copy "Re <name>: " at once (to paste when typing instead of dictating), and
 // show the name big. A page can't close the viewer (tested 2026-10-24), so it says to swipe down.
 function mic(id, t) {
-  copyText("Re " + (numOf(t) ? numOf(t) + " " : "") + nameOf(id, t) + ": ");
+  copyText("Re " + nameOf(id, t) + ": ");
   const f = el("div", "flash"); f.setAttribute("role", "status");
   f.append(el("big", null, nameOf(id, t)), el("span", null, "Copied. Swipe down to go back to the chat."));
   f.onclick = () => f.remove();
@@ -567,12 +570,11 @@ function setupNoteBox() {
 
 let db = null, isOwner = false;
 // The head of an item: number, title, kind, what it blocks, its spoken name, a badge.
-// pos is the item's place in the list it is shown in, so the numbers always read 1, 2, 3; a
-// Waiting card shows its own number instead ("#3"), which stays while places shift.
-const numOf = (t) => Number.isInteger(t.num) ? "#" + t.num : null;
+// pos is the item's place in the list it is shown in, so the numbers always read 1, 2, 3 and
+// follow the keeper's order as it changes. A card is named by its title, never its number.
 function head(id, t, tag, pos) {
   const h = el(tag, "head");
-  const rank = el("span", "rank", numOf(t) || String(pos ?? "·"));
+  const rank = el("span", "rank", String(pos ?? "·"));
   const meta = el("div", "meta");
   const b = badgeOf(id, t); if (b) meta.append(el("span", "badge", b));
   if (t.state === "waiting" && t.heldAt) meta.append(el("span", "badge", "Review when you ask"));
@@ -581,7 +583,7 @@ function head(id, t, tag, pos) {
   if (t.blocks) meta.append(inline(el("span"), "Blocks " + t.blocks));
   if (t.state === "working") { if (t.workingSince || t.since) meta.append(el("span", null, "in progress since " + day(t.workingSince || t.since))); }
   else if (t.since) meta.append(el("span", null, "since " + day(t.since)));
-  if (t.state === "waiting") meta.append(el("span", "say", "say “" + nameOf(id, t) + "”" + (numOf(t) || pos ? " or “" + (numOf(t) || pos) + "”" : "")));
+  if (t.state === "waiting") meta.append(el("span", "say", "say “" + nameOf(id, t) + "”"));
   h.append(rank, el("span", "t-title", t.title || id), meta);
   return h;
 }
@@ -596,17 +598,18 @@ function folds(id, t, b) {
     b.append(f);
   });
 }
-// The full body: everything needed to decide from scratch, then the one-tap answers.
+// The full body: the ask and the recommendation first, so they're never missed; then
+// everything needed to decide from scratch (context, folds, boards); then the one-tap answers.
 function body(id, t, docked) {
   const b = el("div", "body");
-  if (t.context) { const x = el("div"); x.style.display = "grid"; x.style.gap = "8px"; x.append(block(t.context)); b.append(field("What this is", x)); }
-  const deps = depList(t.dependsOn); if (deps) b.append(field("Waiting on", deps));
-  folds(id, t, b);
-  const shots = gallery(t.images); if (shots) b.append(field("The boards (tap to enlarge)", shots));
   if (t.ask) b.append(field(stepLink(t) ? "Your step" : "The ask", inline(el("div", "ask"), t.ask)));
   const sl = stepLink(t); if (sl) b.append(linkTo(el("a", "btn primary step", sl.label || "Open"), safeUrl(sl.url)));
   if (t.recommend) b.append(field("Recommended", inline(el("p"), t.recommend)));
   if (t.ifNone) b.append(field("If you have no preference", inline(el("p"), t.ifNone)));
+  if (t.context) { const x = el("div"); x.style.display = "grid"; x.style.gap = "8px"; x.append(block(t.context)); b.append(field("What this is", x)); }
+  const deps = depList(t.dependsOn); if (deps) b.append(field("Waiting on", deps));
+  folds(id, t, b);
+  const shots = gallery(t.images); if (shots) b.append(field("The boards (tap to enlarge)", shots));
   if (t.answer) { const p = el("div", "answered"); p.append(el("b", null, "Your answer" + (t.answeredAt ? ", " + when(t.answeredAt) : "") + ": "), t.answer); b.append(p); }
   if (db && isOwner && !docked && t.state === "waiting") { b.append(quickRow(id, t)); b.append(Object.assign(el("span", "sent", notes[id] || ""), { id: "st-" + id })); }
   const links = linkRow(stepLink(t) ? t.links.slice(1) : t.links); if (links) b.append(field("Links", links));

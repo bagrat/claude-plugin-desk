@@ -12,7 +12,7 @@ for (const scheme of ['dark', 'light']) {
   const s = await open(b, { db: { tasks: rows }, scheme });
   const items = await s.p.$$eval('.stage > .card .deps li', (l) => l.map((x) => x.className));
   ok(JSON.stringify(items) === JSON.stringify(['d-open', 'd-building', 'd-open', 'd-done']), `${scheme}: four items, each with its state`);
-  ok(await s.p.$eval('.stage > .card .body > .field .lbl', (n) => n.textContent) === 'What this is', `${scheme}: context first`);
+  ok(await s.p.$eval('.stage > .card .body > .field .lbl', (n) => n.textContent) === 'The ask', `${scheme}: the ask first (rule 3)`);
   if (scheme === 'dark') {
     await s.p.click('.stage > .card .deps button:has-text("the hand test")'); await s.p.waitForTimeout(400);
     ok(await s.p.textContent('.stage > .card .t-title') === 'Hand test 1.2', 'a tap opens the waiting card');
