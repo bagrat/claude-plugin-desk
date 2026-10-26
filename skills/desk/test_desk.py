@@ -220,6 +220,34 @@ class Checks(Base):
         for rid in "def":
             self.assertEqual(self.msgs(rid, s), [], rid)
 
+    def test_negated_or_settled_phrase_is_no_question(self):
+        # Issue 29: a mention of the owner with no open question isn't one.
+        quiet = [
+            {"note": "Done; nothing waits on you"},
+            {"note": "No question for you here."},
+            {"note": "This isn't your call: the tests decide."},
+            {"note": "None of it is waiting on you."},
+            {"details": [{"title": "The plan (your call, 2026-01-01)", "text": "Ship it Friday."}]},
+            {"note": "Picked Friday; it was your call."},
+            {"note": "You decided on Friday; you chose the short name."},
+        ]
+        loud = [
+            {"note": "Friday or Monday: your call?"},
+            {"note": "You decide: Friday or Monday."},
+            {"note": "Nothing is blocked. Your call: Friday or Monday."},
+            {"note": "Done. Should we ship it Friday?"},
+            {"note": "Not done yet; waits on you for the key."},
+        ]
+        s = {"session_01AAAA": "working"}
+        for i, f in enumerate(quiet):
+            self.put(f"q{i}", working(**f))
+        for i, f in enumerate(loud):
+            self.put(f"l{i}", working(**f))
+        for i, f in enumerate(quiet):
+            self.assertEqual(self.msgs(f"q{i}", s), [], f)
+        for i, f in enumerate(loud):
+            self.assertTrue(any("asks the owner" in m for m in self.msgs(f"l{i}", s)), f)
+
     def test_prep_message_flags_questions_on_no_card(self):
         self.put("a", waiting(ask="Merge the price box change now?", recommend="Yes, merge it."))
         draft = self.root / "draft.md"
