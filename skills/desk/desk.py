@@ -214,14 +214,14 @@ def news(rows):
 
 
 def footer(rows, now):
-    """Rule 8: ✦ news (only when there is some), ☝︎ waiting, ∙•● working."""
+    """Rule 8: ✦ news (only when there is some), ● waiting, ◌ working."""
     if not PAGE:
         sys.exit("no Desk configured: no .claude/desk.json with a page (run /desk:setup, or pass --desk)")
     n, m = counts(rows, now)
     k = len(by_state(rows, "news"))
     if k:
-        return f"[✦ {k} · ☝︎ {n} · ∙•● {m}]({PAGE}#news)"
-    return f"[☝︎ {n} · ∙•● {m}]({PAGE}#waiting)"
+        return f"[✦ {k} ··· ● {n} ··· ◌ {m}]({PAGE}#news)"
+    return f"[● {n} ··· ◌ {m}]({PAGE}#waiting)"
 
 
 def rank_of(r):
