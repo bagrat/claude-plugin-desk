@@ -12,11 +12,9 @@ with this one. `S=<the desk skill's directory>/desk.py`.
 
 ## At the start (and after a handoff)
 
-1. **The plugin, as a git clone.** The rule-reload check follows the plugin through a git
-   clone. In a cloud session: attach `bagrat/claude-plugin-desk` (read access is enough),
-   clone it as the tool says, and register it (`register_repo_root`) so its skills load.
-   On a computer with the plugin installed, that copy is used and updated by
-   `claude plugin update desk@bagrat`.
+1. **The plugin's clone at `~/.claude/desk`.** The rule-reload check and `/desk:update`
+   follow the plugin through it; `cloud-setup.sh` keeps it in a cloud session. If it's
+   missing, `git clone https://github.com/bagrat/claude-plugin-desk ~/.claude/desk`.
 2. **Watch the page:** ArtifactComments `watch`, `url` the Desk's page. Its buttons and note
    box wake you through that watch; check it registered (`watch` with no url lists them).
 3. Mark the rules as read: `python3 $S loaded`.
@@ -36,12 +34,16 @@ Every time, in this order:
 4. Make this turn's changes with `move`, `images`, `rank`, `dep`, and send the entries they
    print with ArtifactData `update` / `delete` / `batch`, pinned to the versions from step 1.
 5. `python3 $S prep <dir> --sessions <scratch>/sessions.json`. When it stops with "the rules
-   changed", pull the clones it names, re-read each file it lists, republish the page if it
-   says the page changed (on a refusal that hands back the live page, merge onto it and
-   publish again until it goes through), run `loaded`, and run `prep` again. Fix every problem it prints: a
+   changed", re-read each file it lists, republish the page if it says the page changed (on a
+   refusal that hands back the live page, merge onto it and publish again until it goes
+   through), run `loaded`, and run `prep` again. Fix every problem it prints: a
    blocked child gets a push to the owner at once, with its session link and the exact thing
    to approve; new waiting cards get one push naming them, then `pushed`.
 6. End the message with a horizontal rule and the footer line `prep` printed, as is.
+
+## New Desk rules
+
+When the Desk orchestrator says a fix merged, run `/desk:update` (the `update` skill) at once.
 
 ## Sessions
 

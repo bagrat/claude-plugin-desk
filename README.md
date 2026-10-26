@@ -16,25 +16,20 @@ Each Desk lives on the account its project lives on, and nothing of one Desk rea
 
 ## Install
 
-On a computer, in Claude Code:
+1. **Once per cloud environment** (claude.ai/code): put this line in its setup script (the
+   environment menu in a session's title bar, then Edit, then Setup script). Every new session
+   has Desk, and a clone of it at `~/.claude/desk`:
 
-```
-/plugin marketplace add bagrat/claude-plugin-marketplace
-/plugin install desk@bagrat
-```
+   ```
+   curl -fsSL https://raw.githubusercontent.com/bagrat/claude-plugin-desk/main/cloud-setup.sh | sh
+   ```
 
-In a cloud session (claude.ai/code), plugins from a repo's settings or added in the app aren't
-installed. Put this line in the cloud environment's setup script (the environment menu in a
-session's title bar, then Edit, then Setup script), and every new session has Desk:
+   On a computer, run the script once, or in Claude Code
+   `/plugin marketplace add bagrat/claude-plugin-marketplace` then `/plugin install desk@bagrat`.
+2. **Once per project**, in its orchestrator session: `/desk:setup`.
 
-```
-curl -fsSL https://raw.githubusercontent.com/bagrat/claude-plugin-desk/main/cloud-setup.sh | sh
-```
-
-A keeper also attaches this repo and registers it (its skills load from `.claude/skills/`):
-the rule-reload check follows a git clone, and the installed copy isn't one.
-
-Then, in the project's keeper session: `/desk:setup`.
+New rules reach a Desk by `/desk:update`: its keeper runs it when told a fix merged, and you
+can run it any time.
 
 ## What's in it
 
@@ -42,11 +37,11 @@ Then, in the project's keeper session: `/desk:setup`.
 | --- | --- |
 | `skills/desk/` | The rules (`SKILL.md`) and `desk.py`, the bookkeeping script, with its tests. |
 | `skills/desk-keeper/` | What a keeper does before every message. |
-| `skills/note`, `look`, `setup`, `feedback` | `/desk:note`, `/desk:look`, `/desk:setup`, `/desk:feedback`. |
+| `skills/note`, `look`, `setup`, `feedback`, `update` | `/desk:note`, `/desk:look`, `/desk:setup`, `/desk:feedback`, `/desk:update`. |
 | `skills/desk-fixer/` | The fixer: one session per issue on this repo, started by a routine. |
 | `page/desk.html` | The page template, and `page/tests/` its Playwright tests. |
 | `.claude/skills/` | Links to `skills/`, so a cloud session that registers this repo loads them. |
-| `cloud-setup.sh` | Installs the plugin from a cloud environment's setup script. |
+| `cloud-setup.sh` | Installs the plugin from a cloud environment's setup script, and keeps its clone at `~/.claude/desk`. |
 
 ## Tests
 
