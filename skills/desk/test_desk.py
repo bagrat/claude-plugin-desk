@@ -994,6 +994,51 @@ class DeskTests(Base):
         self.assertEqual(code, 0, out)
         self.assertIn("check: ok", out)
 
+    def test_backup_and_restore_round_trip(self):
+        self.put("a", waiting(title="Pick a font"), version=4)
+        self.put("b", working())
+        (self.note_dir() / "n-1.json").write_text(json.dumps({"text": "fix the dashes", "from": "page", "at": NOW}))
+        (self.root / "dump" / "settings").mkdir()
+        (self.root / "dump" / "settings" / "look.json").write_text(json.dumps({"theme": "moss", "icon": {"emoji": "📦"}}))
+        f = self.root / "scratch" / "desk-backup.json"
+        code, out, _ = self.run_cli("backup", self.root / "dump", "--out", f, "--now", NOW)
+        self.assertEqual(code, 0)
+        b = json.loads(f.read_text())
+        self.assertEqual((b["page"], b["at"]), (PAGE, NOW))
+        self.assertEqual(b["collections"]["tasks"]["a"]["title"], "Pick a font")
+        self.assertEqual(b["collections"]["inbox"]["n-1"]["text"], "fix the dashes")
+        self.assertEqual(b["collections"]["settings"]["look"]["theme"], "moss")
+        # A write went wrong: a card lost its title, a stray card appeared. Restore puts it back.
+        self.put("a", waiting(title="oops"), version=5)
+        self.put("c", working(title="stray"), version=2)
+        (self.note_dir() / "n-2.json").write_text(json.dumps({"text": "new", "from": "page", "at": NOW}))
+        out_dir = self.root / "restore"
+        code, out, _ = self.run_cli("restore", f, "--out", out_dir, "--rows", self.root / "dump")
+        self.assertEqual(code, 0)
+        res = json.loads(out)
+        self.assertEqual(res["page"], PAGE)
+        sets = {(e["collection"], e["doc_id"]): e for e in res["writes"] if e["op"] == "set"}
+        self.assertEqual(set(sets), {("tasks", "a"), ("tasks", "b"), ("inbox", "n-1"), ("settings", "look")})
+        for (coll, rid), e in sets.items():
+            self.assertEqual(json.loads(Path(e["file_path"]).read_text()), b["collections"][coll][rid])
+            self.assertTrue(Path(e["file_path"]).is_relative_to(out_dir))
+        dels = [(e["collection"], e["doc_id"]) for e in res["writes"] if e["op"] == "delete"]
+        self.assertEqual(dels, [("tasks", "c")])  # n-2 came in since: the owner's, it stays
+        self.assertIn({"op": "delete", "collection": "tasks", "doc_id": "c", "if_version": 2}, res["writes"])
+        self.assertTrue((self.dir / "c.json").exists())
+
+    def test_backup_stays_out_of_repos(self):
+        self.put("a", waiting())
+        repo = self.root / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        with self.assertRaises(SystemExit) as e:
+            self.run_cli("backup", self.root / "dump", "--out", repo / "backup.json")
+        self.assertIn("inside a git repo", str(e.exception.code))
+        self.assertFalse((repo / "backup.json").exists())
+        code, _, _ = self.run_cli("backup", self.root / "dump", "--out", repo / "backup.json", "--private-repo")
+        self.assertEqual(code, 0)
+
     def test_look(self):
         code, out, _ = self.run_cli("look", "--theme", "Lagoon", "--emoji", "💼", "--out", self.root)
         e = json.loads(out)
