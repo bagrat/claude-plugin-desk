@@ -96,7 +96,7 @@ h2 { margin: 20px 0 10px; font-size: 13px; font-weight: 600; letter-spacing: 0.0
 .head { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; padding: 14px 16px; }
 details.task > summary { list-style: none; cursor: pointer; }
 details.task > summary::-webkit-details-marker { display: none; }
-.rank { grid-row: span 2; width: 30px; height: 30px; border-radius: 50%; background: var(--chip-bg); color: var(--muted); font: 700 14px/30px var(--f-ui); text-align: center; font-variant-numeric: tabular-nums; }
+.rank { grid-row: span 2; min-width: 30px; padding: 0 4px; box-sizing: border-box; height: 30px; border-radius: 50%; background: var(--chip-bg); color: var(--muted); font: 700 14px/30px var(--f-ui); text-align: center; font-variant-numeric: tabular-nums; }
 .t-title { font-weight: 600; font-size: 17px; line-height: 1.3; text-wrap: balance; }
 .meta { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: 13px; color: var(--quiet); }
 .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--chip-bg); }
@@ -431,7 +431,7 @@ async function answer(id, t, kind, text, card) {
 // The microphone: copy "Re <name>: " at once (to paste when typing instead of dictating), and
 // show the name big. A page can't close the viewer (tested 2026-10-24), so it says to swipe down.
 function mic(id, t) {
-  copyText("Re " + nameOf(id, t) + ": ");
+  copyText("Re " + (numOf(t) ? numOf(t) + " " : "") + nameOf(id, t) + ": ");
   const f = el("div", "flash"); f.setAttribute("role", "status");
   f.append(el("big", null, nameOf(id, t)), el("span", null, "Copied. Swipe down to go back to the chat."));
   f.onclick = () => f.remove();
@@ -554,10 +554,12 @@ function setupNoteBox() {
 
 let db = null, isOwner = false;
 // The head of an item: number, title, kind, what it blocks, its spoken name, a badge.
-// pos is the item's place in the list it is shown in, so the numbers always read 1, 2, 3.
+// pos is the item's place in the list it is shown in, so the numbers always read 1, 2, 3; a
+// Waiting card shows its own number instead ("#3"), which stays while places shift.
+const numOf = (t) => Number.isInteger(t.num) ? "#" + t.num : null;
 function head(id, t, tag, pos) {
   const h = el(tag, "head");
-  const rank = el("span", "rank", String(pos ?? "·"));
+  const rank = el("span", "rank", numOf(t) || String(pos ?? "·"));
   const meta = el("div", "meta");
   const b = badgeOf(id, t); if (b) meta.append(el("span", "badge", b));
   if (t.state === "working" && t.answeredAt) meta.append(el("span", "badge ok", "Answered " + day(t.answeredAt)));
@@ -565,7 +567,7 @@ function head(id, t, tag, pos) {
   if (t.blocks) meta.append(inline(el("span"), "Blocks " + t.blocks));
   if (t.state === "working") { if (t.workingSince || t.since) meta.append(el("span", null, "in progress since " + day(t.workingSince || t.since))); }
   else if (t.since) meta.append(el("span", null, "since " + day(t.since)));
-  if (t.state === "waiting") meta.append(el("span", "say", "say “" + nameOf(id, t) + "”" + (pos ? " or “" + pos + "”" : "")));
+  if (t.state === "waiting") meta.append(el("span", "say", "say “" + nameOf(id, t) + "”" + (numOf(t) || pos ? " or “" + (numOf(t) || pos) + "”" : "")));
   h.append(rank, el("span", "t-title", t.title || id), meta);
   return h;
 }

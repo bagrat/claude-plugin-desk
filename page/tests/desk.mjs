@@ -79,4 +79,11 @@ for (const scheme of ['dark', 'light']) {
   ok(await s.p.isVisible('#note-text'), 'owner: #note opens the note tab'); await s.ctx.close(); }
 { const s = await open(b, { db: { tasks }, assets: false });
   ok(await s.p.$eval('#note-pick-l', (n) => n.hidden), 'no assets: no screenshot button'); await s.ctx.close(); }
+// A Waiting card's number names it, not its place: the head shows "#7" and the spoken name says it.
+{ const s = await open(b, { db: { tasks: { 'ship-date': { ...tasks['ship-date'], num: 7 }, 'old-card': { ...tasks['ship-date'], title: 'No number yet', rank: 2 } } } });
+  ok(await s.p.textContent('#t-ship-date .rank') === '#7', 'the head shows the card\'s number');
+  ok(/say “Pick the ship date” or “#7”/.test(await s.p.textContent('#t-ship-date .say')), 'the spoken name gives the number');
+  await s.p.click('#tab-all');
+  ok(await s.p.textContent('#a-ship-date .rank') === '#7' && await s.p.textContent('#a-old-card .rank') === '2', 'in the list too; no number: its place');
+  ok(s.errs.length === 0, 'no errors ' + s.errs.join(' ')); await s.ctx.close(); }
 await done(b);
