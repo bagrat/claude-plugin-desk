@@ -18,6 +18,7 @@ import sys
 import tempfile
 import time
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pathlib import Path
 from urllib.parse import quote
 
@@ -97,7 +98,7 @@ def find_config(start=None):
 
 def load_config(path=None):
     """Set PAGE, CONFIG and CONFIG_PATH from a desk.json: {"title", "page", "keeper"?,
-    "watch"?: [clone paths], "look"?: {"theme", "icon"}}. Returns the config ({} if none)."""
+    "timezone"?: IANA name, "watch"?: [clone paths], "look"?: {"theme", "icon"}}. Returns the config ({} if none)."""
     global PAGE, CONFIG, CONFIG_PATH
     f = Path(path) if path else (Path(os.environ["DESK_CONFIG"]) if os.environ.get("DESK_CONFIG") else find_config())
     if not f:
@@ -196,6 +197,41 @@ def iso(t):
 
 def now_arg(s):
     return parse_time(s) if s else datetime.now(timezone.utc)
+
+
+def owner_zone():
+    """The owner's time zone: desk.json's `timezone` (an IANA name), UTC when it has none."""
+    name = CONFIG.get("timezone")
+    if not name:
+        return timezone.utc
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        sys.exit(f"desk.json timezone {name!r} is not an IANA time zone (like Europe/Berlin)")
+
+
+def owner_time(t):
+    """A time as the owner reads it: in their zone, with the zone's abbreviation."""
+    return t.astimezone(owner_zone()).strftime("%a %d %b %H:%M %Z")
+
+
+OWNER_WORDS = re.compile(r"^(?:(today|tomorrow|\d{4}-\d{2}-\d{2})\s+)?(\d{1,2}):(\d{2})$", re.I)
+
+
+def from_owner(words, now):
+    """'tomorrow 9:00', 'today 17:30', '2026-11-02 9:00' or '9:00' in the owner's zone, or an ISO
+    time with its offset: the moment, in UTC."""
+    m = OWNER_WORDS.match(words.strip())
+    if not m:
+        t = parse_time(words) if re.search(r"(Z|[+-]\d{2}:?\d{2})$", words.strip()) else None
+        if not t:
+            sys.exit(f"can't read {words!r}: say 'tomorrow 9:00', 'today 17:30', '2026-11-02 9:00' or an ISO time with its zone")
+        return t.astimezone(timezone.utc)
+    tz, day, h, mi = owner_zone(), (m.group(1) or "today").lower(), int(m.group(2)), int(m.group(3))
+    today = now.astimezone(tz).date()
+    d = (today if day == "today" else today + timedelta(days=1) if day == "tomorrow"
+         else datetime.strptime(day, "%Y-%m-%d").date())
+    return datetime(d.year, d.month, d.day, h, mi, tzinfo=tz).astimezone(timezone.utc)
 
 
 # ---------------------------------------------------------------- counting and order
@@ -1088,17 +1124,23 @@ def look_doc(theme=None, emoji=None, image=None, letter=None, current=None):
 # ---------------------------------------------------------------- the page
 
 def render_page(template, cfg):
-    """The template with this Desk's title, keeper link and first look filled in."""
+    """The template with this Desk's title, keeper link, owner's time zone and first look filled in."""
     title = cfg.get("title") or "Desk"
     look = cfg.get("look") or {}
     theme = (look.get("theme") or "frost").lower()
     if theme not in THEMES:
         sys.exit(f"desk.json look.theme {theme!r} is not one of {', '.join(THEMES)}")
+    zone = cfg.get("timezone") or ""
+    if zone:
+        try:
+            ZoneInfo(zone)
+        except (ZoneInfoNotFoundError, ValueError):
+            sys.exit(f"desk.json timezone {zone!r} is not an IANA time zone (like Europe/Berlin)")
     keeper = cfg.get("keeper") or ""
     if keeper and not keeper.startswith("https://"):
         keeper = "https://claude.ai/code/" + keeper
     html = template
-    for k, v in (("DESK_TITLE", title), ("DESK_THEME", theme), ("DESK_KEEPER", keeper),
+    for k, v in (("DESK_TITLE", title), ("DESK_THEME", theme), ("DESK_KEEPER", keeper), ("DESK_TIMEZONE", zone),
                  ("DESK_ICON", json.dumps(look.get("icon") or {}, ensure_ascii=False))):
         html = html.replace("{{" + k + "}}", v.replace("<", "&lt;") if k != "DESK_ICON" else v.replace("<", "\\u003c"))
     left = re.findall(r"\{\{[A-Z_]+\}\}", html)
@@ -1371,7 +1413,8 @@ def cmd_order(a):
     if later:
         print("Later:")
         for r in later:
-            back = "review when you ask" if held(r) else f"back {r.get('snoozeUntil')}"
+            t = parse_time(r.get("snoozeUntil"))
+            back = "review when you ask" if held(r) else f"back {owner_time(t) if t else r.get('snoozeUntil')}"
             print(f"  - {describe(r)} ({back})")
     print("In progress:")
     for r in sorted(by_state(rows, "working"), key=lambda r: str(r.get("workingSince") or r.get("updatedAt") or ""), reverse=True):
@@ -1492,6 +1535,9 @@ def cmd_prep(a):
     if late:
         print(late)
         return 1
+    if not CONFIG.get("timezone"):
+        print("warning: desk.json has no timezone: ask the owner theirs (an IANA name) and add it; times read as UTC till then",
+              file=sys.stderr)
     code = cmd_check(a)
     if a.message:
         for q in unheld_asks(Path(a.message).read_text(), load_rows(a.rows)):
@@ -1507,6 +1553,12 @@ def cmd_prep(a):
     print()
     cmd_footer(a)
     return code
+
+
+def cmd_when(a):
+    t = from_owner(a.words, now_arg(a.now))
+    print(f"{iso(t)}  {owner_time(t)}")
+    return 0
 
 
 def cmd_loaded(a):
@@ -1652,6 +1704,11 @@ def main(argv=None):
     s.add_argument("--out", help="the directory for look.json (default: beside --current's rows, "
                    "in patches/; without --current, a new temp directory)")
     s.set_defaults(fn=cmd_look)
+
+    s = sub.add_parser("when", help="a time in the owner's zone: their words to UTC ISO, or an ISO time as they read it")
+    s.add_argument("words", help="'tomorrow 9:00', 'today 17:30', '2026-11-02 9:00', or an ISO time with its zone")
+    s.add_argument("--now", help="ISO time to judge by (default: now)")
+    s.set_defaults(fn=cmd_when)
 
     s = sub.add_parser("backup", help="before a handoff: tasks, inbox and settings as read, in one JSON file")
     s.add_argument("rows", help="the out_dir that holds tasks/, inbox/ and settings/")

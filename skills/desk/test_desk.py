@@ -49,7 +49,7 @@ class Base(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         cfg = self.root / "desk.json"
-        cfg.write_text(json.dumps({"title": "Test Desk", "page": PAGE}))
+        cfg.write_text(json.dumps({"title": "Test Desk", "page": PAGE, "timezone": "UTC"}))
         self._env = os.environ.get("DESK_CONFIG")
         os.environ["DESK_CONFIG"] = str(cfg)
         tasks.load_config()
@@ -150,6 +150,54 @@ class Order(Base):
         entries = json.loads(out)
         self.assertEqual({e["doc_id"] for e in entries}, {"review", "check", "free-review"})  # decide stays 2
         self.assertEqual(self.row("review")["rank"], 1)
+
+
+class OwnerZone(Base):
+    """Times the owner reads, and times written from what the owner said, are in desk.json's timezone."""
+
+    def zone(self, tz):
+        cfg = self.root / "desk.json"
+        cfg.write_text(json.dumps({"title": "Test Desk", "page": PAGE, **({"timezone": tz} if tz else {})}))
+        tasks.load_config()
+
+    def test_when_reads_the_owners_words_in_their_zone(self):
+        self.zone("America/New_York")
+        code, out, _ = self.run_cli("when", "tomorrow 9:00", "--now", NOW)  # 08:00 in New York
+        self.assertEqual(code, 0)
+        self.assertEqual(out.split()[0], "2026-10-26T13:00:00Z")  # EDT, UTC-4
+        self.assertIn("Mon 26 Oct 09:00 EDT", out)
+        self.assertEqual(self.run_cli("when", "2026-11-02 9:00", "--now", NOW)[1].split()[0], "2026-11-02T14:00:00Z")  # EST
+        self.assertEqual(self.run_cli("when", "today 17:30", "--now", NOW)[1].split()[0], "2026-10-25T21:30:00Z")
+        # Late at night in New York it is already the next day in UTC; "tomorrow" is New York's.
+        self.assertEqual(self.run_cli("when", "tomorrow 9:00", "--now", "2026-10-26T02:00:00Z")[1].split()[0], "2026-10-26T13:00:00Z")
+
+    def test_when_shows_a_stored_time_in_the_owners_zone(self):
+        self.zone("Asia/Tokyo")
+        code, out, _ = self.run_cli("when", "2026-10-26T00:00:00Z")
+        self.assertEqual(out.strip(), "2026-10-26T00:00:00Z  Mon 26 Oct 09:00 JST")
+        with self.assertRaises(SystemExit):
+            self.run_cli("when", "next week sometime")
+
+    def test_order_shows_snoozes_in_the_owners_zone(self):
+        self.zone("Asia/Tokyo")
+        self.put("later", waiting(snoozeUntil="2026-10-26T00:00:00Z"))
+        out = self.run_cli("order", self.dir, "--now", NOW)[1]
+        self.assertIn("(back Mon 26 Oct 09:00 JST)", out)
+
+    def test_no_zone_is_utc_and_prep_says_so(self):
+        self.zone(None)
+        self.assertEqual(self.run_cli("when", "tomorrow 9:00", "--now", NOW)[1].split()[0], "2026-10-26T09:00:00Z")
+        self.put("a", waiting())
+        code, out, err = self.run_cli("prep", self.dir, "--now", NOW, "--no-fetch-rules")
+        self.assertIn("no timezone", err)
+        self.zone("Asia/Tokyo")
+        self.assertNotIn("no timezone", self.run_cli("prep", self.dir, "--now", NOW, "--no-fetch-rules")[2])
+
+    def test_unknown_zone_is_refused(self):
+        self.zone("Mars/Olympus")
+        with self.assertRaises(SystemExit) as e:
+            self.run_cli("when", "tomorrow 9:00")
+        self.assertIn("Mars/Olympus", str(e.exception.code))
 
 
 class Checks(Base):
@@ -1198,9 +1246,9 @@ class DeskTests(Base):
     def test_page_renders_this_desk(self):
         tpl = self.root / "t.html"
         tpl.write_text("<title>{{DESK_TITLE}}</title><html data-desk-theme=\"{{DESK_THEME}}\">"
-                       "<script>const KEEPER=\"{{DESK_KEEPER}}\", ICON={{DESK_ICON}};</script>")
+                       "<script>const KEEPER=\"{{DESK_KEEPER}}\", ICON={{DESK_ICON}}, TZ=\"{{DESK_TIMEZONE}}\";</script>")
         cfg = self.root / "d2.json"
-        cfg.write_text(json.dumps({"title": "A <b> Desk", "page": PAGE, "keeper": "session_01X",
+        cfg.write_text(json.dumps({"title": "A <b> Desk", "page": PAGE, "keeper": "session_01X", "timezone": "Europe/Berlin",
                                    "look": {"theme": "plum", "icon": {"emoji": "🗂️"}}}))
         out = self.root / "p.html"
         code, msg, _ = self.run_cli("--desk", cfg, "page", "--out", out, "--template", tpl)
@@ -1209,6 +1257,7 @@ class DeskTests(Base):
         self.assertIn('data-desk-theme="plum"', html)
         self.assertIn('KEEPER="https://claude.ai/code/session_01X"', html)
         self.assertIn('ICON={"emoji": "🗂️"}', html)
+        self.assertIn('TZ="Europe/Berlin"', html)
         self.assertIn(PAGE, msg)
         self.assertIn("refused", msg)
 

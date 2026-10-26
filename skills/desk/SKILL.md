@@ -15,10 +15,13 @@ Which Desk you're on comes from the project's `.claude/desk.json`:
 
 ```json
 {"title": "shroom Desk", "page": "https://claude.ai/artifact/…", "keeper": "session_…",
- "watch": ["/home/user/other-clone"], "look": {"theme": "frost", "icon": {"emoji": "🍄"}}}
+ "timezone": "Europe/Berlin", "watch": ["/home/user/other-clone"], "look": {"theme": "frost", "icon": {"emoji": "🍄"}}}
 ```
 
-`page` is the Desk's link; `keeper` the session that keeps it; `watch` other clones whose rules
+`page` is the Desk's link; `keeper` the session that keeps it; `timezone` the owner's (an IANA
+name): every time on a card, in a push or in the keeper's chat is written in it, with its
+abbreviation ("Tue 27 Oct 09:00 CET"), and the page shows times in it (`when` converts both
+ways; without one, `prep` warns and times read as UTC); `watch` other clones whose rules
 the keeper must reload when they change; `look` what the page is made with (the live look is
 the page's `settings/look` row, rule 16). Only the keeper writes its cards (rule 11).
 
@@ -59,9 +62,10 @@ directory; `--desk FILE` (before the command) or `$DESK_CONFIG` names another.
 | `python3 $S sorted $R <note-id> […]` | The deletes for notes now held by cards. |
 | `python3 $S note --text "…" --from <where> --out DIR [--image ID=caption]` | A note for this Desk's Inbox (what `/desk:note` runs). |
 | `python3 $S look [--theme T] [--emoji E \| --image ASSET \| --letter L] [--current row.json] [--list]` | The `settings/look` row (rule 16). |
+| `python3 $S when "tomorrow 9:00"\|"today 17:30"\|"2026-11-02 9:00"\|ISO` | A time in the owner's zone: their words to the UTC ISO a row stores (`snoozeUntil`, `when`), or a stored ISO as they read it. |
 | `python3 $S backup $R --out FILE [--private-repo]` | Before a handoff: the cards, notes and look as read, in one JSON file with a timestamp. Refuses a file inside a git repo (a project's repo may be public) unless `--private-repo`. |
 | `python3 $S restore FILE [--rows $R] [--out DIR]` | The writes that put a backup back: a `set` per row; with a fresh read, also a `delete` per card or setting the backup lacks (new notes stay). |
-| `python3 $S page --out FILE` | The page to publish for this Desk: the template with its title, keeper and look. |
+| `python3 $S page --out FILE` | The page to publish for this Desk: the template with its title, keeper, time zone and look. |
 | `python3 $S scrub DRAFT [--rows $R]` | What in a feedback draft might carry the Desk's content (rule 17). |
 | `python3 $S issue-url --title T --body FILE [--rows $R]` | A prefilled new-issue link on the plugin's repo; refuses while `scrub` flags anything. |
 
@@ -161,7 +165,7 @@ it.
    its recap (`move … news --context …`). Anything to try by hand stays a Waiting card (kind
    `check`). Otherwise the card closes on their answer (`move … done`).
 10. **The buttons.** On a Waiting card: 👍 go with the recommended (to In progress), ⏭ back
-    tomorrow at 9:00, 💬 say it in the chat. **A step only the owner can do off the page** (open a
+    tomorrow at 9:00 in the owner's zone, 💬 say it in the chat. **A step only the owner can do off the page** (open a
     link and submit it, sign in somewhere, press a button on another site) is kind `step`
     (2026-10-26): its ask is the step, its link is first in `links` and shows as the card's main
     button, and 👍 reads **Done** and reports "Done." (to In progress, where you check it took).
