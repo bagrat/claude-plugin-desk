@@ -800,5 +800,33 @@ class DeskTests(Base):
             self.run_cli("issue-url", "--title", "t", "--body", body)
 
 
+class CloudSetup(unittest.TestCase):
+    """cloud-setup.sh: installs the plugin in a cloud session's setup script, and never fails it."""
+
+    SCRIPT = Path(__file__).resolve().parents[2] / "cloud-setup.sh"
+
+    def run_script(self, claude_body):
+        with tempfile.TemporaryDirectory() as d:
+            log = Path(d) / "log"
+            if claude_body is not None:
+                fake = Path(d) / "claude"
+                fake.write_text(f'#!/bin/sh\necho "$@" >> "{log}"\n{claude_body}\n')
+                fake.chmod(0o755)
+            env = dict(os.environ, PATH=f"{d}:/usr/bin:/bin")
+            p = subprocess.run(["sh", str(self.SCRIPT)], env=env, capture_output=True, text=True)
+            return p.returncode, log.read_text().splitlines() if log.exists() else []
+
+    def test_installs_from_the_marketplace(self):
+        code, calls = self.run_script("exit 0")
+        self.assertEqual(code, 0)
+        self.assertEqual(calls, ["plugin marketplace add bagrat/claude-plugin-marketplace",
+                                 "plugin install desk@bagrat", "plugin update desk@bagrat"])
+
+    def test_never_fails_the_setup(self):
+        self.assertEqual(self.run_script("exit 1"), (0, ["plugin marketplace add bagrat/claude-plugin-marketplace",
+                                                         "plugin install desk@bagrat", "plugin update desk@bagrat"]))
+        self.assertEqual(self.run_script(None), (0, []))
+
+
 if __name__ == "__main__":
     unittest.main()

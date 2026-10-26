@@ -23,8 +23,16 @@ On a computer, in Claude Code:
 /plugin install desk@bagrat
 ```
 
-In a cloud session (claude.ai/code), plugins from a repo's settings aren't installed, so the
-keeper attaches this repo and registers it; its skills load from `.claude/skills/`.
+In a cloud session (claude.ai/code), plugins from a repo's settings or added in the app aren't
+installed. Put this line in the cloud environment's setup script (the environment menu in a
+session's title bar, then Edit, then Setup script), and every new session has Desk:
+
+```
+curl -fsSL https://raw.githubusercontent.com/bagrat/claude-plugin-desk/main/cloud-setup.sh | sh
+```
+
+A keeper also attaches this repo and registers it (its skills load from `.claude/skills/`):
+the rule-reload check follows a git clone, and the installed copy isn't one.
 
 Then, in the project's keeper session: `/desk:setup`.
 
@@ -38,6 +46,7 @@ Then, in the project's keeper session: `/desk:setup`.
 | `skills/desk-fixer/` | The fixer: one session per issue on this repo, started by a routine. |
 | `page/desk.html` | The page template, and `page/tests/` its Playwright tests. |
 | `.claude/skills/` | Links to `skills/`, so a cloud session that registers this repo loads them. |
+| `cloud-setup.sh` | Installs the plugin from a cloud environment's setup script. |
 
 ## Tests
 
