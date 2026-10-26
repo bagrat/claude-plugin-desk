@@ -8,7 +8,7 @@ informed and holds what needs you, kept by one Claude session (the project's *ke
   ask and a recommendation. 👍 goes with the recommendation, ⏭ brings it back tomorrow, 💬 says
   it in the chat.
 - **In progress** and **Coming up**: what sessions are working on, and what's held for later.
-- **The Inbox**: drop a note from the page (type or dictate, add a screenshot) or with
+- **The Inbox**: drop a note from the page's last tab (type or dictate, add a screenshot) or with
   `/desk:note` in any session; the keeper turns it into a card. A strip shows notes being sorted.
 - **Its own look**: 15 Nord-like themes and any icon, so you see at a glance which Desk you're on.
 

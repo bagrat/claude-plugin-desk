@@ -143,9 +143,10 @@ it.
     scheduled job's result worth seeing. Never routine progress. Added in the same turn the
     chat would have said it. A title, a one-line `context`, maybe links, folds and images; never
     an ask; never pushes. It stays until Seen.
-15. **The Inbox.** The owner drops notes from the page's box, from `/desk:note` in any session on
-    the account, or in the keeper's chat. Notes wait in the `inbox` collection and show on the
-    page as a strip ("2 notes being sorted"). The keeper sorts every one before its next message
+15. **The Inbox.** The owner drops notes from the page's note tab (the pencil, last in the bar,
+    owner only; 2026-10-26), from `/desk:note` in any session on the account, or in the keeper's
+    chat. Notes wait in the `inbox` collection and show above the cards as a strip ("2 notes
+    being sorted"), only while some wait. The keeper sorts every one before its next message
     (`prep` stops on them): folds it into its task's card, makes a new card (Waiting if it needs
     a decision, In progress if work starts), or does it at once and posts news; then deletes the
     note (`sorted`). A note's images move onto its card.
@@ -162,7 +163,7 @@ it.
 
 ## How it reaches you
 
-The page's buttons and its note box save to the database and post a "sent to Claude" comment,
+The page's buttons and its note tab save to the database and post a "sent to Claude" comment,
 which wakes whichever session **watches** the page (ArtifactComments `watch`): the keeper holds
 that watch. On a wake: read the thread, act, reply in one line, resolve it, update the row.
 
