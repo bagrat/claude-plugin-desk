@@ -28,8 +28,8 @@ Each Desk lives on the account its project lives on, and nothing of one Desk rea
    `/plugin marketplace add bagrat/claude-plugin-marketplace` then `/plugin install desk@bagrat`.
 2. **Once per project**, in its orchestrator session: `/desk:setup`.
 
-New rules reach a Desk by `/desk:update`: its keeper runs it when told a fix merged, and you
-can run it any time.
+New rules reach a Desk by `/desk:update`: its keeper runs it when told a fix merged or when
+`prep`'s background check finds one (every 6 hours at most), and you can run it any time.
 
 ## What's in it
 
