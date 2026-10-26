@@ -21,7 +21,9 @@ put two projects on one Desk.
    and publish it with the Artifact tool, `capabilities: {db: {}, user: {}, assets: {},
    comments: {}}`, `icon: "inbox"`. **Moving an existing page in place:** publish to its `url`
    instead (its rows, assets and comments stay) and omit `capabilities` if it already has
-   those four.
+   those four. Expect refusals when another session or context published it last: the first
+   often comes with the diff, the next as identical content resent. Each time it hands back
+   the live page, merge onto it and publish again until it goes through.
 4. Put the page's link in `desk.json` as `page`, commit, and set the look row
    (`desk.py look …`, ArtifactData `set`, collection `settings`, doc `look`).
 5. Become its keeper: load `desk-keeper` and do its start steps (the page's watch first).
