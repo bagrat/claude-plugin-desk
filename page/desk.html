@@ -562,6 +562,7 @@ function head(id, t, tag, pos) {
   const rank = el("span", "rank", numOf(t) || String(pos ?? "·"));
   const meta = el("div", "meta");
   const b = badgeOf(id, t); if (b) meta.append(el("span", "badge", b));
+  if (t.state === "waiting" && t.heldAt) meta.append(el("span", "badge", "Review when you ask"));
   if (t.state === "working" && t.answeredAt) meta.append(el("span", "badge ok", "Answered " + day(t.answeredAt)));
   meta.append(el("span", "chip k-" + (t.kind || "info"), KIND[t.kind] || "For you to know"));
   if (t.blocks) meta.append(inline(el("span"), "Blocks " + t.blocks));
@@ -826,7 +827,7 @@ function drawWaiting(slid) {
 const sinceShort = (iso) => { const d = new Date(iso); if (isNaN(d)) return ""; const today = new Date().toDateString() === d.toDateString();
   return today ? d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : d.toLocaleDateString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" }); };
 // Where you are, as a row of dashes: one per item, the current one lit, a new or changed one
-// marked at its left end. Tap a dash to go there. Items put off till tomorrow sit after it as
+// marked at its left end. Tap a dash to go there. Items put off (till tomorrow, or until you ask) sit after it as
 // ⏭ and a number; tap to show or hide them.
 function countLine(i) {
   const bar = el("div", "dashes");
@@ -838,7 +839,7 @@ function countLine(i) {
     bar.append(d);
   });
   if (ui.later) {
-    const t = iconBtn("later-n", "later", ui.showLater ? "Hide the items put off till tomorrow" : ui.later + " put off till tomorrow, show them");
+    const t = iconBtn("later-n", "later", ui.showLater ? "Hide the items put off for later" : ui.later + " put off for later, show them");
     t.append(String(ui.later)); if (ui.showLater) t.classList.add("on");
     t.onclick = () => { ui.showLater = !ui.showLater; if (ui.docs) render(ui.docs); };
     bar.append(t);
@@ -858,8 +859,10 @@ function render(docs) {
   const by = (st) => all.filter(([, t]) => t.state === st);
   const now = new Date().toISOString();
   const waitingAll = by("waiting").sort((a, b) => (a[1].rank ?? 99) - (b[1].rank ?? 99));
-  const later = waitingAll.filter(([, t]) => t.snoozeUntil && t.snoozeUntil > now);
-  const shown = ui.showLater ? waitingAll : waitingAll.filter(([, t]) => !(t.snoozeUntil && t.snoozeUntil > now));
+  // Later: put off till tomorrow, or held until you ask for it (heldAt).
+  const parked = (t) => !!t.heldAt || !!(t.snoozeUntil && t.snoozeUntil > now);
+  const later = waitingAll.filter(([, t]) => parked(t));
+  const shown = ui.showLater ? waitingAll : waitingAll.filter(([, t]) => !parked(t));
   // Order: wrap-ups first, to clear them out of the way; then what you've been discussing
   // with the keeper in the last few hours (activeAt, latest first); then by priority.
   const recent = (t) => t.activeAt && Date.now() - Date.parse(t.activeAt) < 3 * 3600e3 ? t.activeAt : "";

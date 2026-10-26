@@ -79,6 +79,20 @@ for (const scheme of ['dark', 'light']) {
   ok(await s.p.isVisible('#note-text'), 'owner: #note opens the note tab'); await s.ctx.close(); }
 { const s = await open(b, { db: { tasks }, assets: false });
   ok(await s.p.$eval('#note-pick-l', (n) => n.hidden), 'no assets: no screenshot button'); await s.ctx.close(); }
+// A review held until the owner asks: under Later, marked, out of the deck and the count.
+{ const held = { ...tasks, 'big-review': { state: 'waiting', kind: 'review', rank: 1, title: 'Review the new layout', ask: 'Does it read well?', recommend: 'Yes.', heldAt: '2026-10-20T10:00:00Z' } };
+  const s = await open(b, { db: { tasks: held } });
+  ok(await s.p.textContent('.stage > .card .t-title') === 'Pick the ship date', 'held: not in the deck');
+  ok(await s.p.textContent('#n-waiting') === '1', 'held: not counted');
+  ok(await s.p.textContent('.later-n') === '1', 'held: under Later');
+  await s.p.click('.later-n');
+  await s.p.waitForTimeout(100);
+  await s.p.click('.dash >> nth=1');
+  await s.p.waitForTimeout(400);
+  ok(/review when you ask/i.test(await s.p.textContent('.stage > .card .head')), 'held: marked "review when you ask"');
+  await s.p.click('#tab-all');
+  ok(/review when you ask/i.test(await s.p.textContent('#a-big-review')), 'held: marked in All too');
+  ok(s.errs.length === 0, 'no errors ' + s.errs.join(' ')); await s.ctx.close(); }
 // A Waiting card's number names it, not its place: the head shows "#7" and the spoken name says it.
 { const s = await open(b, { db: { tasks: { 'ship-date': { ...tasks['ship-date'], num: 7 }, 'old-card': { ...tasks['ship-date'], title: 'No number yet', rank: 2 } } } });
   ok(await s.p.textContent('#t-ship-date .rank') === '#7', 'the head shows the card\'s number');
