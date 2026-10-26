@@ -1,0 +1,939 @@
+<title>{{DESK_TITLE}}</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one narrow column, phone first. A sticky bar with the Desk's icon and its tabs (News
+   first, only when there is news), then the Inbox: notes being sorted, and a box to drop one.
+   It opens on News when there is some; Waiting shows one item at a time, in the order to do
+   them, with one-tap answers. Colors: Frost below; the Desk's theme (THEMES) overrides them. */
+:root {
+  --bg: #eceff4; --card: #ffffff; --edge: #d8dee9; --fg: #2e3440; --muted: #4c566a; --quiet: #6b7385;
+  --accent: #4c6f9a; --accent-ink: #ffffff; --decide: #8a5a99; --review: #4c6f9a; --check: #a0742a; --do: #4f7d3f;
+  --chip-bg: #e5e9f0; --done: #6b7385; --new: #b4561f; --ok: #4f7d3f; --raise: #ffffff;
+  --f-ui: "Figtree", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #242933; --card: #2e3440; --edge: #3b4252; --fg: #eceff4; --muted: #c5cbd6; --quiet: #9aa3b2;
+  --accent: #88c0d0; --accent-ink: #1f242c; --decide: #c9a3d4; --review: #88c0d0; --check: #ebcb8b; --do: #a3be8c;
+  --chip-bg: #3b4252; --done: #9aa3b2; --new: #e5a27a; --ok: #a3be8c; --raise: #3b4252; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #242933; --card: #2e3440; --edge: #3b4252; --fg: #eceff4; --muted: #c5cbd6; --quiet: #9aa3b2;
+  --accent: #88c0d0; --accent-ink: #1f242c; --decide: #c9a3d4; --review: #88c0d0; --check: #ebcb8b; --do: #a3be8c;
+  --chip-bg: #3b4252; --done: #9aa3b2; --new: #e5a27a; --ok: #a3be8c; --raise: #3b4252; color-scheme: dark }
+
+body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--f-ui); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.wrap { max-width: 720px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 0 48px; }
+a { color: var(--accent); }
+a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+[hidden] { display: none !important; }
+
+/* The header is one line: the Desk's icon, then five tabs, each an icon and a count. */
+header.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); border-bottom: 1px solid var(--edge); display: flex; align-items: center; gap: 6px; height: 50px; }
+.logo { flex: none; width: 30px; height: 30px; }
+.logo { display: grid; place-items: center; border-radius: 8px; overflow: hidden; font: 700 15px var(--f-ui); line-height: 1; }
+.logo.emoji { font-size: 22px; }
+.logo.letter { background: var(--accent); color: var(--accent-ink); }
+.logo img { width: 30px; height: 30px; object-fit: contain; display: block; }
+
+/* The Inbox (rule 15): your notes waiting for the keeper, and the box to drop one. */
+.inbox { display: grid; gap: 8px; margin: 10px 0 4px; }
+.strip { border: 1px solid var(--edge); border-radius: 12px; background: var(--chip-bg); font-size: 14px; }
+.strip > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 12px; color: var(--muted); font-weight: 600; }
+.strip > summary::-webkit-details-marker { display: none; }
+.strip .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+@media (prefers-reduced-motion: no-preference) { .strip .pulse { animation: pulse 1.6s ease-in-out infinite; } @keyframes pulse { 50% { opacity: .35; } } }
+.strip ul { list-style: none; margin: 0; padding: 0 12px 10px; display: grid; gap: 6px; }
+.strip li { display: grid; gap: 2px; padding-top: 6px; border-top: 1px solid var(--edge); }
+.strip li span { color: var(--quiet); font-size: 12px; }
+.note-box > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; color: var(--accent); font-weight: 600; font-size: 14px; }
+.note-box > summary::-webkit-details-marker { display: none; }
+.note-box[open] > summary { margin-bottom: 6px; }
+.note-box .row2 { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.note-box input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.note-box .picked { font-size: 13px; color: var(--quiet); }
+.stamp { margin: 24px 0 0; font-size: 12px; color: var(--quiet); }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--edge); background: var(--card); color: var(--fg); font: 600 15px var(--f-ui); text-decoration: none; cursor: pointer; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn:disabled { opacity: .5; cursor: default; }
+.btn svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Tabs sized to their content, with the same space before the first as between them. */
+.tabs { flex: 1; display: flex; justify-content: space-evenly; height: 100%; }
+.tabs button { flex: none; padding: 0 8px; }
+.tabs button { display: flex; align-items: center; justify-content: center; gap: 5px; height: 100%; padding: 0 2px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--quiet); cursor: pointer; }
+.tabs button svg { width: 21px; height: 21px; flex: none; }
+.tabs button b { font: 700 16px var(--f-ui); font-variant-numeric: tabular-nums; }
+.tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+svg.i { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* News: things to know, each cleared by Seen (rule 14). Its tab shows only when there is some. */
+.ncard .rank { color: var(--new); display: grid; place-items: center; }
+.ncard .rank svg { width: 17px; height: 17px; }
+.ncard.leaving { opacity: 0; transform: translateX(24px); transition: opacity .18s, transform .18s; }
+.seen-row { display: flex; justify-content: flex-end; }
+.btn.seen { min-width: 120px; border-color: var(--ok); color: var(--ok); }
+.btn.seen svg { width: 18px; height: 18px; }
+.toast button { margin-left: 10px; border: 0; background: none; padding: 4px 2px; color: inherit; font: 700 14px var(--f-ui); text-decoration: underline; cursor: pointer; }
+.mode { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 14px 0 10px; }
+.seg { display: inline-flex; border: 1px solid var(--edge); border-radius: 10px; overflow: hidden; }
+.seg button { min-height: 36px; padding: 0 12px; border: 0; background: var(--card); color: var(--muted); font: 600 13px var(--f-ui); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.later-note { font-size: 13px; color: var(--quiet); }
+.later-note button { border: 0; background: none; padding: 0; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
+
+h2 { margin: 20px 0 10px; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--quiet); text-wrap: balance; }
+.list { display: grid; gap: 10px; }
+.empty { padding: 14px 16px; border: 1px dashed var(--edge); border-radius: 12px; color: var(--quiet); }
+
+.card, details.task { background: var(--card); border: 1px solid var(--edge); border-radius: 12px; }
+.card { touch-action: pan-y; }
+/* The focus card and, while it is dragged, its neighbour sliding in beside it. */
+/* It reaches past the side margins so a card slides off the screen edge, not the margin. */
+.stage { position: relative; overflow: clip; margin-inline: -16px; padding-inline: 16px; }
+.stage > .card { will-change: transform; }
+.stage > .peek { position: absolute; top: 0; left: 16px; right: 16px; pointer-events: none; }
+.head { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; padding: 14px 16px; }
+details.task > summary { list-style: none; cursor: pointer; }
+details.task > summary::-webkit-details-marker { display: none; }
+.rank { grid-row: span 2; width: 30px; height: 30px; border-radius: 50%; background: var(--chip-bg); color: var(--muted); font: 700 14px/30px var(--f-ui); text-align: center; font-variant-numeric: tabular-nums; }
+.t-title { font-weight: 600; font-size: 17px; line-height: 1.3; text-wrap: balance; }
+.meta { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: 13px; color: var(--quiet); }
+.chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--chip-bg); }
+.k-decide { color: var(--decide); } .k-review { color: var(--review); } .k-check { color: var(--check); } .k-do { color: var(--do); } .k-info { color: var(--quiet); }
+.badge { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--new); border: 1px solid currentColor; }
+.badge.ok { color: var(--ok); }
+.say { font-style: italic; }
+.body { padding: 0 16px 16px 58px; display: grid; gap: 12px; min-width: 0; }
+.body p { margin: 0; max-width: 65ch; }
+.body ul { margin: 0; padding-left: 18px; max-width: 65ch; }
+.field { display: grid; gap: 4px; }
+.field > .lbl { font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--quiet); }
+.ask { padding: 10px 12px; border-radius: 10px; background: var(--chip-bg); font-weight: 500; }
+.links { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 14px; }
+.quick { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.quick .go { grid-column: 1 / -1; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.answered { padding: 8px 12px; border-left: 3px solid var(--ok); background: var(--chip-bg); border-radius: 0 10px 10px 0; font-size: 14px; }
+.more > summary { cursor: pointer; color: var(--accent); font-size: 14px; font-weight: 600; min-height: 32px; display: flex; align-items: center; }
+.more[open] > summary { margin-bottom: 8px; }
+.fold { border-top: 1px solid var(--edge); padding-top: 4px; }
+.fold > summary::before { content: "▸"; margin-right: 8px; transition: transform .15s; }
+.fold[open] > summary::before { transform: rotate(90deg); }
+.id { font: 12px var(--f-mono); color: var(--quiet); }
+/* What a card waits on: ✓ done, ◐ building, ○ open; a linked item opens its card. */
+.deps { list-style: none; margin: 0; padding: 0 !important; display: grid; gap: 4px; }
+.deps li { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 6px; align-items: baseline; }
+.deps .mk { width: 16px; height: 16px; align-self: center; }
+.deps .d-done .mk { color: var(--ok); } .deps .d-done .it { color: var(--quiet); }
+.deps .d-building .mk { color: var(--accent); } .deps .d-open .mk { color: var(--quiet); }
+.deps button.it { border: 0; background: none; padding: 0; text-align: left; font: inherit; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.deps .d-done button.it { color: var(--quiet); }
+/* An opened card clears the sticky bar. */
+details.task, .row { scroll-margin-top: calc(env(safe-area-inset-top, 0px) + 60px); }
+.toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 30; max-width: calc(100vw - 32px); background: var(--fg); color: var(--bg); padding: 8px 14px; border-radius: 10px; font-size: 14px; text-align: center; }
+
+/* One at a time: the answers and the arrows sit in a bar at the bottom, in reach of a thumb,
+   so a long item never pushes them off screen. Sized for a 402pt-wide phone (iPhone 17). */
+/* Floating, inset from the sides so the screen's rounded corners never clip a button. */
+.dock { position: fixed; left: 0; right: 0; bottom: calc(16px + env(safe-area-inset-bottom, 0px) * 0.35); z-index: 6; padding: 0 44px; pointer-events: none; }
+.dock-in { max-width: 340px; margin: 0 auto; display: grid; gap: 8px; justify-items: center; }
+.dock-row { width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; pointer-events: auto; }
+.dock-row .btn { padding: 0 6px; min-height: 46px; border-radius: 14px; background: var(--raise); border-color: color-mix(in srgb, var(--edge) 60%, var(--quiet)); box-shadow: 0 8px 22px rgba(0, 0, 0, .32), 0 1px 3px rgba(0, 0, 0, .22); }
+.dock-row svg.i { width: 22px; height: 22px; }
+/* ✓ is green, Later is yellow, the microphone stays plain. */
+.btn.go { background: var(--raise); border-color: var(--ok); color: var(--ok); }
+.btn.later { color: var(--check); }
+.dock .sent { text-align: center; min-height: 0; padding: 4px 10px; border-radius: 999px; background: var(--card); box-shadow: 0 4px 12px rgba(0, 0, 0, .25); }
+.dock .sent:empty { display: none; }
+body:has(#p-waiting:not([hidden]) .dock) .wrap { padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px) * 0.35); }
+body:has(#p-waiting:not([hidden]) .dock) .toast { bottom: calc(80px + env(safe-area-inset-bottom, 0px) * 0.35); }
+.count { font-size: 13px; color: var(--quiet); font-variant-numeric: tabular-nums; margin: 4px 0 6px; }
+/* The dashes stay pinned under the tabs while a card scrolls (2026-10-25). */
+#p-waiting .count { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 50px); z-index: 4; background: var(--bg); margin: 0 0 6px; padding: 4px 0 2px; }
+.dashes { display: flex; align-items: center; gap: 4px; }
+.dash { flex: 1; min-width: 0; height: 22px; border: 0; padding: 0; background: none; position: relative; cursor: pointer; }
+.dash::after { content: ""; position: absolute; left: 0; right: 0; top: 9px; height: 4px; border-radius: 2px; background: var(--edge); }
+.dash.on::after { background: var(--accent); }
+.dash.new::before { content: ""; position: absolute; left: 0; top: 9px; width: 7px; height: 4px; border-radius: 2px; background: var(--new); z-index: 1; }
+.later-n { flex: none; display: inline-flex; align-items: center; gap: 3px; height: 22px; padding: 0 2px 0 6px; border: 0; background: none; color: var(--check); font: 600 12px var(--f-ui); cursor: pointer; }
+.later-n svg { width: 13px; height: 13px; }
+.later-n.on { text-decoration: underline; }
+/* The microphone: the item's name, big, to carry into the chat. */
+.flash { position: fixed; inset: 0; z-index: 40; display: grid; place-content: center; gap: 12px; padding: 24px; text-align: center; background: var(--accent); color: var(--accent-ink); }
+.flash big { font: 700 34px/1.15 var(--f-ui); text-wrap: balance; }
+.flash span { font-size: 16px; opacity: .85; }
+
+.shots { display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 6px; margin-right: -16px; padding-right: 16px; }
+.shot { flex: 0 0 auto; width: min(72%, 260px); scroll-snap-align: start; display: grid; gap: 4px; padding: 0; border: 0; background: none; color: var(--muted); font: 12px/1.35 var(--f-ui); text-align: left; cursor: zoom-in; }
+.shot img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; object-position: top; border-radius: 10px; border: 1px solid var(--edge); background: var(--chip-bg); }
+.lightbox { position: fixed; inset: 0; z-index: 20; background: #0f1218; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; padding: max(12px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) max(12px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px)); gap: 10px; color: #eceff4; }
+.lightbox .lb-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 14px; }
+.lightbox .lb-img { overflow: auto; display: grid; place-items: start center; }
+.lightbox img { max-width: 100%; height: auto; border-radius: 8px; }
+.lightbox .lb-nav { display: flex; justify-content: space-between; gap: 8px; }
+.lightbox .btn { background: #2e3440; border-color: #3b4252; color: #eceff4; }
+.answer { display: grid; gap: 8px; }
+.answer textarea { box-sizing: border-box; width: 100%; min-height: 76px; resize: vertical; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--edge); background: var(--bg); color: var(--fg); font: 15px/1.45 var(--f-ui); }
+.sent { font-size: 13px; color: var(--quiet); }
+
+.row { background: var(--card); border: 1px solid var(--edge); border-radius: 12px; padding: 12px 16px; display: grid; gap: 4px; min-width: 0; }
+.row .r-title { font-weight: 600; }
+.row .r-note { color: var(--muted); font-size: 14px; max-width: 65ch; }
+.row .r-note p { margin: 0; } .row .r-note ul { margin: 0; padding-left: 18px; }
+.row.done .r-title { color: var(--done); text-decoration: line-through; text-decoration-thickness: 1px; }
+.when { font: 500 12px var(--f-mono); color: var(--quiet); }
+footer { margin-top: 28px; font-size: 13px; color: var(--quiet); max-width: 65ch; }
+@media (max-width: 480px) { .body { padding-left: 16px; } }
+@media (prefers-reduced-motion: no-preference) {
+  details.task[open] .body, .card.enter { animation: in .16s ease-out; }
+  @keyframes in { from { opacity: .4; transform: translateY(-2px); } }
+}
+</style>
+
+<div class="wrap">
+  <header class="bar">
+    <span class="logo letter" id="logo" role="img" aria-label="{{DESK_TITLE}}" title="{{DESK_TITLE}}"></span>
+    <nav class="tabs" role="tablist" aria-label="Lists">
+      <button role="tab" id="tab-news" data-tab="news" aria-label="News" hidden><b id="n-news">–</b></button>
+      <button role="tab" id="tab-waiting" data-tab="waiting" aria-label="Waiting on you"><b id="n-waiting">–</b></button>
+      <button role="tab" id="tab-working" data-tab="working" aria-label="In progress"><b id="n-working">–</b></button>
+      <button role="tab" id="tab-scheduled" data-tab="scheduled" aria-label="Coming up"><b id="n-scheduled">–</b></button>
+      <button role="tab" id="tab-all" data-tab="all" aria-label="Everything on one page"></button>
+    </nav>
+  </header>
+
+  <section class="inbox" id="inbox" aria-label="Notes">
+    <details class="strip" id="strip" hidden><summary><span class="pulse"></span><span id="strip-n"></span></summary><ul id="strip-l"></ul></details>
+    <details class="note-box" id="note-box" hidden>
+      <summary>✎ Drop a note</summary>
+      <div class="answer">
+        <textarea id="note-text" placeholder="An observation, a change you want: type or dictate…" aria-label="Your note"></textarea>
+        <div class="row2">
+          <button type="button" class="btn primary" id="note-send">Send to the keeper</button>
+          <label class="btn" id="note-pick-l" for="note-pick">Add a screenshot</label><input type="file" id="note-pick" accept="image/*" multiple>
+          <span class="picked" id="note-picked"></span>
+        </div>
+        <span class="sent" id="note-st"></span>
+      </div>
+    </details>
+  </section>
+
+  <section id="p-news" role="tabpanel" aria-labelledby="tab-news" hidden>
+    <h2>News</h2><div class="list" id="l-news"></div>
+  </section>
+  <section id="p-waiting" role="tabpanel" aria-labelledby="tab-waiting">
+    <div class="count" id="count">Loading the list…</div>
+    <div id="l-waiting"></div>
+  </section>
+  <section id="p-working" role="tabpanel" aria-labelledby="tab-working" hidden>
+    <h2>In progress</h2><div class="list" id="l-working"></div>
+  </section>
+  <section id="p-scheduled" role="tabpanel" aria-labelledby="tab-scheduled" hidden>
+    <h2>Coming up</h2><div class="list" id="l-scheduled"></div>
+  </section>
+  <section id="p-all" role="tabpanel" aria-labelledby="tab-all" hidden>
+    <div id="a-news-box" hidden><h2>News</h2><div class="list" id="a-news"></div></div>
+    <h2>Waiting on you</h2><div class="list" id="a-waiting"></div>
+    <h2>In progress</h2><div class="list" id="a-working"></div>
+    <h2>Coming up</h2><div class="list" id="a-scheduled"></div>
+    <p class="stamp" id="stamp"></p>
+  </section>
+
+</div>
+
+<script>
+// This Desk, filled in when the page is made for it (desk.py page): its keeper's session.
+const KEEPER = "{{DESK_KEEPER}}";
+const DESK_LOOK = { theme: "{{DESK_THEME}}", icon: {{DESK_ICON}} };
+// Icons (Lucide's shapes, picked 2026-10-24): tabs and the answer buttons.
+const ICON = {
+  news: '<path d="M9.94 15.5a2 2 0 0 0-1.44-1.44l-6.13-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.14a.5.5 0 0 1 .96 0l1.58 6.14a2 2 0 0 0 1.44 1.44l6.14 1.58a.5.5 0 0 1 0 .96l-6.14 1.58a2 2 0 0 0-1.44 1.44l-1.58 6.14a.5.5 0 0 1-.96 0z"/>',
+  waiting: '<path d="M18 11V6a2 2 0 0 0-4 0v5"/><path d="M14 10V4a2 2 0 0 0-4 0v6"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/>',
+  working: '<circle cx="3.2" cy="12" r="2" fill="currentColor" stroke="none"/><circle cx="10.4" cy="12" r="2.9" fill="currentColor" stroke="none"/><circle cx="19.2" cy="12" r="3.8" fill="currentColor" stroke="none"/>',
+  scheduled: '<path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5M16 2v4M8 2v4M3 10h5"/><circle cx="16" cy="16" r="6"/><path d="M16 14v2l1 1"/>',
+  done: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4 12 14.01l-3-3"/>',
+  all: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  go: '<path d="M7 10v12M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/>',
+  later: '<path d="m5 4 10 8-10 8zM19 5v14"/>',
+  mic: '<path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/>',
+  prev: '<path d="m15 18-6-6 6-6"/>', next: '<path d="m9 18 6-6-6-6"/>',
+};
+const icon = (k) => { const t = document.createElement("template"); t.innerHTML = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true">' + ICON[k] + "</svg>"; return t.content.firstChild; };
+const iconBtn = (cls, k, label, text) => { const b = btn(cls); b.append(icon(k)); if (text) b.append(text); b.setAttribute("aria-label", label); b.title = label; return b; };
+const KIND = { decide: "Decide", review: "Review", check: "Check by hand", do: "Do", info: "For you to know", close: "Call it done?" };
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+const btn = (cls, text) => { const b = el("button", cls, text); b.type = "button"; return b; };
+const safeUrl = (u) => { try { const x = new URL(u); return x.protocol === "https:" ? x.href : null; } catch { return null; } };
+
+// Inline markup in stored text: **bold** and [label](https://…), built with text nodes only.
+function inline(parent, text) {
+  const re = /\*\*([^*]+)\*\*|\[([^\]]+)\]\((https:[^)\s]+)\)/g; let last = 0, m;
+  const s = String(text ?? "");
+  while ((m = re.exec(s))) {
+    if (m.index > last) parent.append(s.slice(last, m.index));
+    if (m[1]) parent.append(el("b", null, m[1]));
+    else { const href = safeUrl(m[3]); if (href) parent.append(linkTo(el("a", null, m[2]), href)); else parent.append(m[2]); }
+    last = re.lastIndex;
+  }
+  if (last < s.length) parent.append(s.slice(last));
+  return parent;
+}
+// A block of text: lines starting "- " become a list, other lines paragraphs.
+function block(text) {
+  const frag = document.createDocumentFragment(); let ul = null;
+  for (const line of String(text ?? "").split("\n")) {
+    if (!line.trim()) { ul = null; continue; }
+    if (line.startsWith("- ")) { if (!ul) { ul = el("ul"); frag.append(ul); } ul.append(inline(el("li"), line.slice(2))); }
+    else { ul = null; frag.append(inline(el("p"), line)); }
+  }
+  return frag;
+}
+const day = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleDateString(undefined, { month: "short", day: "numeric" }); };
+const when = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); };
+
+function toast(msg, undo) {
+  document.querySelectorAll(".toast").forEach((t) => t.remove()); const t = el("div", "toast", msg); t.setAttribute("role", "status");
+  if (undo) { const u = btn(null, "Undo"); u.onclick = () => { t.remove(); undo(); }; t.append(u); }
+  document.body.append(t); setTimeout(() => t.remove(), undo ? 5000 : 2600);
+}
+const copyText = (text) => navigator.clipboard.writeText(text).then(() => true, () => false);
+function linkRow(items) {
+  const box = el("div", "links");
+  for (const l of items || []) { const href = safeUrl(l.url); if (!href) continue; box.append(linkTo(el("a", null, l.label || href), href)); }
+  return box.childElementCount ? box : null;
+}
+function field(label, node) { const f = el("div", "field"); f.append(el("span", "lbl", label), node); return f; }
+
+// Links out: plain links, which the claude.ai viewer opens itself. A script-opened tab is
+// blocked in the frame, and on a phone no link form reaches the app (claude:// does nothing,
+// claude.ai/code stays in the browser; tested 2026-10-24).
+function linkTo(a, url) { a.href = url; a.target = "_blank"; a.rel = "noopener"; return a; }
+
+// Board images: stored as artifact assets, a row holds [{id, caption}].
+const imgSrc = (im) => /^[0-9a-f]{32}$/.test(im?.id || "") ? "/_blob/" + im.id : null;
+function lightbox(images, i) {
+  const box = el("div", "lightbox"); box.setAttribute("role", "dialog"); box.setAttribute("aria-modal", "true");
+  const top = el("div", "lb-top"), cap = el("span"), close = btn("btn", "Close");
+  top.append(cap, close);
+  const wrap = el("div", "lb-img"), img = el("img"); wrap.append(img);
+  const nav = el("div", "lb-nav"), prev = btn("btn", "‹ Previous"), next = btn("btn", "Next ›");
+  nav.append(prev, next);
+  const show = (k) => { i = (k + images.length) % images.length; img.src = imgSrc(images[i]); img.alt = images[i].caption || ""; cap.textContent = (i + 1) + " / " + images.length + (images[i].caption ? " · " + images[i].caption : ""); wrap.scrollTop = 0; };
+  const end = () => { box.remove(); document.removeEventListener("keydown", key); };
+  const key = (e) => { if (e.key === "Escape") end(); if (e.key === "ArrowRight") show(i + 1); if (e.key === "ArrowLeft") show(i - 1); };
+  close.onclick = end; prev.onclick = () => show(i - 1); next.onclick = () => show(i + 1);
+  if (images.length < 2) nav.hidden = true;
+  document.addEventListener("keydown", key);
+  box.append(top, wrap, nav); document.body.append(box); show(i); close.focus();
+}
+function gallery(images) {
+  const ims = (images || []).filter(imgSrc);
+  if (!ims.length) return null;
+  const strip = el("div", "shots");
+  ims.forEach((im, i) => {
+    const b = btn("shot");
+    const img = el("img"); img.src = imgSrc(im); img.alt = im.caption || ""; img.loading = "lazy";
+    b.append(img, el("span", null, im.caption || ""));
+    b.onclick = () => lightbox(ims, i);
+    strip.append(b);
+  });
+  return strip;
+}
+
+// Per-viewer memory of what was seen, for the New and Updated badges. Browser storage can be
+// missing (private views, previews), so the page works without it: then nothing is badged.
+const store = {
+  // "shroom-tasks:" is the key the first Desk used before it had a name; read it as a fallback.
+  get(k, d) { try { const v = localStorage.getItem("desk:" + k) ?? localStorage.getItem("shroom-tasks:" + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("desk:" + k, JSON.stringify(v)); } catch {} },
+};
+// What you've seen follows you across devices: it's kept in your own private corner of the
+// page's database (data/users/<you>), with this browser's copy as a fallback.
+let seen0 = store.get("seen", null);               // as it was when the page opened
+let seen = Object.assign({}, seen0 || {});
+let seenRef = null, seenT = null;
+const pushSeen = () => { clearTimeout(seenT); seenT = setTimeout(() => seenRef?.set({ seen, at: new Date().toISOString() }).catch(() => {}), 1500); };
+async function loadSeen(u) {
+  const uid = await u?.id?.().catch(() => null); if (!db || !uid) return;
+  seenRef = db.collection("data/users/" + uid).doc("seen");
+  const snap = await seenRef.get().catch(() => null), remote = snap?.exists ? snap.data().seen : null;
+  if (!remote) { if (seen0) pushSeen(); return; }
+  // Seen on any device counts: the later stamp wins.
+  const merged = Object.assign({}, seen0 || {});
+  for (const [k, v] of Object.entries(remote)) if (!(k in merged) || String(v) > String(merged[k])) merged[k] = v;
+  seen0 = merged; seen = Object.assign({}, merged, Object.fromEntries(Object.entries(seen).filter(([k, v]) => String(v) > String(merged[k] ?? ""))));
+  store.set("seen", seen);
+}
+const stampOf = (t) => t.updatedAt || t.since || "";
+function badgeOf(id, t) {
+  if (!seen0) return null;
+  if (!(id in seen0)) return "New";
+  return stampOf(t) > seen0[id] ? "Updated" : null;
+}
+function markSeen(id, t) { if (seen[id] !== stampOf(t)) { seen[id] = stampOf(t); store.set("seen", seen); pushSeen(); } }
+
+// Answers. Each one is kept in the item, and sent to the keeper as a comment on this
+// page "sent to Claude": the keeper watches the page, so that wakes it. (A connector
+// message was tried first and is blocked for pages: blocked_by_policy, 2026-10-24.) If the
+// send can't go, the keeper finds the answer on the item at its next check.
+let cm = null; // the comments namespace, fetched at load so a tap can anchor at once
+async function tell(text, anchorP) {
+  const c = cm;
+  if (!c || !anchorP) return { how: "kept", code: "no_comments" };
+  try {
+    const anchor = await anchorP;
+    const can = await c.canSendToClaude().catch(() => "off");
+    if (can !== "available") return { how: "kept", code: "send_" + can };
+    await c.sendToClaude({ anchor, text });
+    return { how: "sent" };
+  } catch (e) { return { how: e?.code === "consent_required" ? "approval" : "kept", code: String(e?.code || "unknown"), detail: String(e?.message || "").slice(0, 300) }; }
+}
+const SENT = {
+  sent: "Sent. The keeper has it.",
+  kept: "Saved. The keeper picks it up at its next check.",
+  approval: "Saved. Sending needs your OK once: allow comments for this page, then tap again. Otherwise the keeper picks it up at its next check.",
+};
+const notes = {}, drafts = {};
+const say = (id, m) => { notes[id] = m; const n = $("st-" + id); if (n) n.textContent = m; };
+const nameOf = (id, t) => t.handle || t.title || id;
+function tomorrow9() { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); return d.toISOString(); }
+
+// An answer unblocks the task: it moves to In progress, and the keeper brings it back
+// to Waiting if it needs you again. Later only hides it until 9:00.
+async function answer(id, t, kind, text, card) {
+  const at = new Date().toISOString();
+  const sending = kind === "later" ? null
+    // The anchor is read now, in the tap, before the save re-renders and replaces the card.
+    : tell("[Desk] " + nameOf(id, t) + " (task " + id + "): " + text, cm && card ? cm.anchorFor(card) : null);
+  const patch = kind === "later"
+    ? { snoozeUntil: tomorrow9(), quick: "later", quickAt: at }
+    : t.kind === "close" && kind === "go"
+      // A finished task comes back once as a recap; the thumbs-up closes it, and it leaves the page.
+      ? { state: "done", doneAt: at, answer: text, answeredAt: at, quick: kind, quickAt: at, answerSent: false }
+      : { state: "working", workingSince: at, answer: text, answeredAt: at, quick: kind, quickAt: at, answerSent: false };
+  say(id, "Saving…");
+  try { await db.collection("tasks").doc(id).update(patch); }
+  catch { say(id, "Couldn't save it. Say it in the chat instead."); toast("Couldn't save. Say it in the chat instead."); return false; }
+  if (kind === "later") { toast("Back tomorrow at 9:00"); return true; }
+  toast(patch.state === "done" ? "Done. It leaves the page" : "Moved to In progress");
+  const { how, code, detail } = await sending;
+  // Why a send failed is kept on the row, so the keeper can see it.
+  db.collection("tasks").doc(id).update(how === "sent" ? { answerSent: true } : { answerSent: false, sendErr: code, sendErrDetail: detail || "" }).catch(() => {});
+  say(id, SENT[how]);
+  toast(SENT[how]);
+  return true;
+}
+
+// The microphone: copy "Re <name>: " at once (to paste when typing instead of dictating), and
+// show the name big. A page can't close the viewer (tested 2026-10-24), so it says to swipe down.
+function mic(id, t) {
+  copyText("Re " + nameOf(id, t) + ": ");
+  const f = el("div", "flash"); f.setAttribute("role", "status");
+  f.append(el("big", null, nameOf(id, t)), el("span", null, "Copied. Swipe down to go back to the chat."));
+  f.onclick = () => f.remove();
+  document.body.append(f);
+  setTimeout(() => f.remove(), 4000);
+}
+function quickButtons(id, t, labelled) {
+  const go = iconBtn("btn go", "go", t.recommend ? "Go with the recommended" : "Go", labelled && (t.recommend ? "Go with the recommended" : "Go"));
+  const later = iconBtn("btn later", "later", "Later: back tomorrow at 9:00", labelled && "Later");
+  const say = iconBtn("btn", "mic", "Say it in the chat", labelled && "Say it in the chat");
+  const card = () => go.closest(".card, details.task") || $("t-" + id);
+  go.onclick = () => { const n = nextAfter(id); answer(id, t, "go", t.recommend ? "Go with the recommended: " + t.recommend : "Go.", card()).then((ok) => ok && advance(n)); };
+  later.onclick = () => { const n = nextAfter(id); answer(id, t, "later", "", card()).then((ok) => ok && advance(n)); };
+  say.onclick = () => mic(id, t);
+  return { go, later, say };
+}
+function quickRow(id, t) {
+  const box = el("div", "quick"), q = quickButtons(id, t, true);
+  box.append(q.go, q.later, q.say);
+  return box;
+}
+function answerBox(id, t) {
+  const box = el("div", "answer");
+  const ta = el("textarea"); ta.value = drafts[id] || ""; ta.oninput = () => { drafts[id] = ta.value; };
+  ta.placeholder = "Type or dictate your answer…"; ta.setAttribute("aria-label", "Your answer");
+  const send = btn("btn", "Send to the keeper");
+  send.onclick = async () => {
+    const v = ta.value.trim(); if (!v) { ta.focus(); return; }
+    send.disabled = true; const keep = drafts[id]; delete drafts[id];
+    if (await answer(id, t, "text", v, send.closest(".card, details.task"))) ta.value = ""; else { drafts[id] = keep; send.disabled = false; }
+  };
+  const row = el("div", "actions"); row.append(send);
+  box.append(ta, row);
+  return box;
+}
+
+
+// The Desk's look (rule 16): a theme and an icon, so each Desk is told apart at a glance. Kept
+// in the page's settings/look row (/desk:look), with what the page was made with as a fallback.
+// Each theme: [ground, surface, text, muted, accent], light then dark. Frost is the page's own
+// colors above, untouched.
+const THEMES = {
+  frost: { name: "Frost" },
+  moss: { name: "Moss", light: ["#ECEFF4", "#E0E6EF", "#2E3440", "#4C566A", "#5E7F48"], dark: ["#2E3440", "#3B4252", "#ECEFF4", "#AEB6C4", "#A3BE8C"] },
+  ember: { name: "Ember", light: ["#ECEFF4", "#E0E6EF", "#2E3440", "#4C566A", "#A8573D"], dark: ["#2E3440", "#3B4252", "#ECEFF4", "#AEB6C4", "#D08770"] },
+  berry: { name: "Berry", light: ["#ECEFF4", "#E0E6EF", "#2E3440", "#4C566A", "#A23F49"], dark: ["#2E3440", "#3B4252", "#ECEFF4", "#AEB6C4", "#BF616A"] },
+  plum: { name: "Plum", light: ["#ECEFF4", "#E0E6EF", "#2E3440", "#4C566A", "#86607F"], dark: ["#2E3440", "#3B4252", "#ECEFF4", "#AEB6C4", "#B48EAD"] },
+  sand: { name: "Sand", light: ["#ECEFF4", "#E0E6EF", "#2E3440", "#4C566A", "#8F6D1E"], dark: ["#2E3440", "#3B4252", "#ECEFF4", "#AEB6C4", "#EBCB8B"] },
+  mauve: { name: "Mauve", light: ["#EFF1F5", "#E3E6ED", "#4C4F69", "#6C6F85", "#8839EF"], dark: ["#1E1E2E", "#313244", "#CDD6F4", "#A6ADC8", "#CBA6F7"] },
+  rose: { name: "Rose", light: ["#FAF4ED", "#F0E6DC", "#575279", "#797593", "#B4637A"], dark: ["#191724", "#26233A", "#E0DEF4", "#908CAA", "#EBBCBA"] },
+  fern: { name: "Fern", light: ["#FDF6E3", "#F1ECD5", "#5C6A72", "#7A8478", "#6B7D00"], dark: ["#2D353B", "#343F44", "#D3C6AA", "#9DA9A0", "#A7C080"] },
+  wave: { name: "Wave", light: ["#F2ECBC", "#E7DFB2", "#545464", "#716E61", "#4D699B"], dark: ["#1F1F28", "#2A2A37", "#DCD7BA", "#A6A69C", "#7E9CD8"] },
+  lagoon: { name: "Lagoon", light: ["#FDF6E3", "#EEE8D5", "#073642", "#586E75", "#1C7A73"], dark: ["#002B36", "#073642", "#EEE8D5", "#93A1A1", "#2AA198"] },
+  night: { name: "Night", light: ["#E6E7ED", "#D6DAE6", "#343B58", "#5A607D", "#2E5FD0"], dark: ["#1A1B26", "#24283B", "#C0CAF5", "#9AA5CE", "#7AA2F7"] },
+  neon: { name: "Neon", light: ["#FBF9F1", "#EFEDE2", "#1F1F1F", "#5F5B48", "#B0185A"], dark: ["#282A36", "#3A3C4E", "#F8F8F2", "#BFBFD8", "#FF79C6"] },
+  rust: { name: "Rust", light: ["#FBF1C7", "#EFE4BA", "#3C3836", "#7C6F64", "#AF3A03"], dark: ["#282828", "#3C3836", "#EBDBB2", "#A89984", "#FE8019"] },
+  lime: { name: "Lime", light: ["#FAFAF5", "#EEEEE4", "#272822", "#6E6B5E", "#557A00"], dark: ["#272822", "#3E3D32", "#F8F8F2", "#A59F85", "#A6E22E"] },
+};
+const mix = (a, b, p) => `color-mix(in srgb, ${a} ${p}%, ${b})`;
+function themeTokens([bg, surf, fg, muted, acc], dark) {
+  return dark
+    ? { bg: mix(bg, "#000", 80), card: bg, edge: surf, fg, muted: mix(fg, muted, 55), quiet: muted, accent: acc, "accent-ink": mix(bg, "#000", 80), review: acc, "chip-bg": surf, done: muted, raise: surf }
+    : { bg, card: mix(bg, "#fff", 30), edge: mix(bg, fg, 82), fg, muted, quiet: mix(muted, bg, 80), accent: acc, "accent-ink": "#ffffff", review: acc, "chip-bg": surf, done: mix(muted, bg, 80), raise: mix(bg, "#fff", 30) };
+}
+const decl = (t) => Object.entries(t).map(([k, v]) => `--${k}: ${v};`).join(" ");
+function applyTheme(name) {
+  const th = THEMES[String(name || "").toLowerCase()] || THEMES.frost;
+  let st = $("desk-theme"); if (!st) { st = el("style"); st.id = "desk-theme"; document.head.append(st); }
+  document.documentElement.dataset.deskTheme = th.name.toLowerCase();
+  if (!th.light) { st.textContent = ""; return; }
+  const L = decl(themeTokens(th.light, false)), D = decl(themeTokens(th.dark, true));
+  // :root:root outranks the page's own Frost blocks, which come later in the document.
+  st.textContent = `:root:root { ${L} }\n@media (prefers-color-scheme: dark) { :root:root:not([data-theme="light"]) { ${D} color-scheme: dark } }\n:root:root[data-theme="dark"] { ${D} color-scheme: dark }`;
+}
+function applyIcon(icon) {
+  const box = $("logo"); box.className = "logo"; box.replaceChildren();
+  const src = icon && /^[0-9a-f]{32}$/.test(icon.image || "") ? "/_blob/" + icon.image : null;
+  if (src) { const im = el("img"); im.src = src; im.alt = ""; box.append(im); return; }
+  if (icon && icon.emoji) { box.classList.add("emoji"); box.textContent = String(icon.emoji).slice(0, 8); return; }
+  box.classList.add("letter"); box.textContent = String((icon && icon.letter) || document.title.trim()[0] || "D").slice(0, 2);
+}
+function applyLook(look) { const l = Object.assign({}, DESK_LOOK, look || {}); applyTheme(l.theme); applyIcon(l.icon); }
+
+// The Inbox (rule 15): notes dropped here, or by /desk:note in any session, wait in the inbox
+// collection until the keeper turns each into a card and deletes it. The strip shows them.
+let assets = null;
+const picked = [];
+function drawInbox(docs) {
+  const notes = docs.map((s) => [s.id, s.data() || {}]).sort((a, b) => String(a[1].at).localeCompare(String(b[1].at)));
+  $("strip").hidden = !notes.length;
+  $("strip-n").textContent = notes.length === 1 ? "1 note being sorted" : notes.length + " notes being sorted";
+  $("strip-l").replaceChildren(...notes.map(([, n]) => {
+    const li = el("li"); li.append(el("div", null, n.text || ""));
+    const from = n.from === "page" ? "from this page" : n.from ? "from " + n.from : "";
+    li.append(el("span", null, [sinceShort(n.at), from, n.images?.length ? n.images.length + " image" + (n.images.length > 1 ? "s" : "") : ""].filter(Boolean).join(" · ")));
+    return li;
+  }));
+}
+function setupNoteBox() {
+  $("note-box").hidden = false;
+  if (!assets) $("note-pick-l").hidden = true;
+  $("note-pick").onchange = (e) => { picked.push(...e.target.files); $("note-picked").textContent = picked.length ? picked.length + " image" + (picked.length > 1 ? "s" : "") + " added" : ""; e.target.value = ""; };
+  $("note-send").onclick = async () => {
+    const ta = $("note-text"), text = ta.value.trim(), send = $("note-send");
+    if (!text && !picked.length) { ta.focus(); return; }
+    send.disabled = true; $("note-st").textContent = "Saving…";
+    const at = new Date().toISOString(), id = "n-" + at.replace(/\D/g, "").slice(0, 14) + "-" + Math.random().toString(16).slice(2, 6);
+    const sending = tell("[Desk note] " + (text || "(images only)") + " (inbox " + id + ")", cm ? cm.anchorFor($("inbox")) : null);
+    try {
+      const images = [];
+      for (const f of picked) { const a = await assets.upload(f); images.push({ id: a.id, caption: f.name || "" }); }
+      await db.collection("inbox").doc(id).set(Object.assign({ text: text || "(see the images)", from: "page", at }, images.length ? { images } : {}));
+    } catch { send.disabled = false; $("note-st").textContent = "Couldn't save it. Tell the keeper in the chat instead."; return; }
+    ta.value = ""; picked.length = 0; $("note-picked").textContent = ""; send.disabled = false;
+    const { how } = await sending;
+    $("note-st").textContent = SENT[how]; toast(how === "sent" ? "Note sent to the keeper" : "Note saved");
+  };
+}
+
+let db = null, isOwner = false;
+// The head of an item: number, title, kind, what it blocks, its spoken name, a badge.
+// pos is the item's place in the list it is shown in, so the numbers always read 1, 2, 3.
+function head(id, t, tag, pos) {
+  const h = el(tag, "head");
+  const rank = el("span", "rank", String(pos ?? "·"));
+  const meta = el("div", "meta");
+  const b = badgeOf(id, t); if (b) meta.append(el("span", "badge", b));
+  if (t.state === "working" && t.answeredAt) meta.append(el("span", "badge ok", "Answered " + day(t.answeredAt)));
+  meta.append(el("span", "chip k-" + (t.kind || "info"), KIND[t.kind] || "For you to know"));
+  if (t.blocks) meta.append(inline(el("span"), "Blocks " + t.blocks));
+  if (t.state === "working") { if (t.workingSince || t.since) meta.append(el("span", null, "in progress since " + day(t.workingSince || t.since))); }
+  else if (t.since) meta.append(el("span", null, "since " + day(t.since)));
+  if (t.state === "waiting") meta.append(el("span", "say", "say “" + nameOf(id, t) + "”" + (pos ? " or “" + pos + "”" : "")));
+  h.append(rank, el("span", "t-title", t.title || id), meta);
+  return h;
+}
+// Longer detail comes in folds, so everything needed to decide is on the card itself.
+function folds(id, t, b) {
+  (t.details || []).forEach((d, k) => {
+    const f = el("details", "more fold"), key = id + ":" + k; f.append(el("summary", null, d.title));
+    const x = el("div"); x.style.display = "grid"; x.style.gap = "8px"; x.append(block(d.text)); f.append(x);
+    // A fold can carry its own images, so each part of a review shows beside its text.
+    const g = gallery(d.images); if (g) x.append(g);
+    f.open = !!ui.moreOpen[key]; f.addEventListener("toggle", () => { ui.moreOpen[key] = f.open; });
+    b.append(f);
+  });
+}
+// The full body: everything needed to decide from scratch, then the one-tap answers.
+function body(id, t, docked) {
+  const b = el("div", "body");
+  if (t.context) { const x = el("div"); x.style.display = "grid"; x.style.gap = "8px"; x.append(block(t.context)); b.append(field("What this is", x)); }
+  const deps = depList(t.dependsOn); if (deps) b.append(field("Waiting on", deps));
+  folds(id, t, b);
+  const shots = gallery(t.images); if (shots) b.append(field("The boards (tap to enlarge)", shots));
+  if (t.ask) b.append(field("The ask", inline(el("div", "ask"), t.ask)));
+  if (t.recommend) b.append(field("Recommended", inline(el("p"), t.recommend)));
+  if (t.ifNone) b.append(field("If you have no preference", inline(el("p"), t.ifNone)));
+  if (t.answer) { const p = el("div", "answered"); p.append(el("b", null, "Your answer" + (t.answeredAt ? ", " + when(t.answeredAt) : "") + ": "), t.answer); b.append(p); }
+  if (db && isOwner && !docked && t.state === "waiting") { b.append(quickRow(id, t)); b.append(Object.assign(el("span", "sent", notes[id] || ""), { id: "st-" + id })); }
+  const links = linkRow(t.links); if (links) b.append(field("Links", links));
+  const sess = linkRow(t.sessions); if (sess) b.append(field("Sessions", sess));
+  const more = el("details", "more"); more.append(el("summary", null, "More: type an answer, copy, mark done"));
+  more.open = !!ui.moreOpen[id]; more.addEventListener("toggle", () => { ui.moreOpen[id] = more.open; });
+  const inner = el("div"); inner.style.display = "grid"; inner.style.gap = "10px";
+  if (db && isOwner) inner.append(answerBox(id, t));
+  const acts = el("div", "actions");
+  const cp = btn("btn", "Copy “Re " + nameOf(id, t) + ":”");
+  cp.onclick = async () => toast(await copyText("Re " + nameOf(id, t) + ": ") ? "Copied. Back in the chat: paste, then dictate" : "Couldn't copy here. Just start with “" + nameOf(id, t) + "”");
+  acts.append(cp); if (KEEPER) acts.append(linkTo(el("a", "btn", "Open the keeper"), KEEPER));
+  if (db) {
+    const done = btn("btn", "Mark done");
+    done.onclick = async () => {
+      done.disabled = true;
+      try { await db.collection("tasks").doc(id).update({ state: "done", doneAt: new Date().toISOString(), doneBy: "page" }); toast("Marked done"); }
+      catch { done.disabled = false; toast("Couldn't save. Tell the keeper instead."); }
+    };
+    acts.append(done);
+  }
+  inner.append(acts, el("span", "id", "id: " + id));
+  more.append(inner); b.append(more);
+  return b;
+}
+// A card that waits on others lists them (dependsOn), each with its state; tap a linked one
+// to open its card. A link whose card is gone stays plain text.
+const DEP = { done: ["check", "Done"], building: ["half", "Building"], open: ["ring", "Open"] };
+const MARK = { check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>', half: '<circle cx="12" cy="12" r="7.5"/><path d="M12 4.5a7.5 7.5 0 0 0 0 15z" fill="currentColor"/>', ring: '<circle cx="12" cy="12" r="7.5"/>' };
+function depList(items) {
+  if (!Array.isArray(items) || !items.length) return null;
+  const ul = el("ul", "deps");
+  for (const d of items) {
+    if (!d || !d.item) continue;
+    const [mk, word] = DEP[d.state] || DEP.open, li = el("li", "d-" + (DEP[d.state] ? d.state : "open"));
+    const t = document.createElement("template"); t.innerHTML = '<svg class="i mk" viewBox="0 0 24 24" role="img"><title>' + word + "</title>" + MARK[mk] + "</svg>"; li.append(t.content.firstChild);
+    const linked = d.card && ui.rows[d.card];
+    const it = linked ? btn("it") : el("span", "it");
+    inline(it, d.item); it.setAttribute("aria-label", word + ": " + d.item + (linked ? ", open its card" : ""));
+    if (linked) it.onclick = (e) => { e.preventDefault(); openCard(d.card); };
+    li.append(it); ul.append(li);
+  }
+  return ul.childElementCount ? ul : null;
+}
+// Open a card wherever it lives: the waiting deck, In progress, or All (snoozed, scheduled).
+function openCard(id) {
+  const t = ui.rows[id]; if (!t) return;
+  if (t.state === "waiting" && ui.deck.includes(id)) { setTab("waiting"); advance(id); return; }
+  if (t.state === "news") { const n = $("n-" + id); if (n) { setTab("news"); n.scrollIntoView({ block: "start" }); } return; }
+  const [tab, where] = t.state === "working" ? ["working", "w"] : ["all", t.state === "waiting" ? "a" : null];
+  const n = where ? $(where + "-" + id) : $("p-all").querySelector("#t-" + CSS.escape(id));
+  if (!n) return;
+  setTab(tab);
+  if (n.tagName === "DETAILS") n.open = true;
+  n.scrollIntoView({ block: "start" });
+}
+function listCard(id, t, pos, where) {
+  const d = el("details", "task"); d.id = where + "-" + id;
+  d.append(head(id, t, "summary", pos), body(id, t));
+  const key = where + ":" + id;
+  d.open = ui.open.has(key);
+  d.addEventListener("toggle", () => { if (d.open) { ui.open.add(key); markSeen(id, t); } else ui.open.delete(key); });
+  return d;
+}
+function row(id, t, extra) {
+  const r = el("div", "row" + (t.state === "done" ? " done" : "")); r.id = "t-" + id;
+  if (extra) r.append(el("span", "when", extra));
+  r.append(inline(el("span", "r-title"), t.title || id));
+  if (t.context) { const n = el("div", "r-note"); n.append(block(t.note || t.context)); r.append(n); }
+  const l = linkRow([...(t.sessions || []), ...(t.links || [])]); if (l) r.append(l);
+  return r;
+}
+// News (rule 14): something to know, never a question. One button, Seen, clears it: the row
+// is deleted from here (or, where the page can't delete, set done for the keeper to
+// delete). It posts no comment: acknowledging news wakes no one. Undo puts the row back.
+const gone = new Set(); // cleared here, before the list catches up
+async function seenNews(id, t, card) {
+  gone.add(id); card.classList.add("leaving");
+  const ref = db.collection("tasks").doc(id), keep = JSON.parse(JSON.stringify(t));
+  let how = null;
+  try { await ref.delete(); how = "deleted"; }
+  catch { try { await ref.update({ state: "done", doneAt: new Date().toISOString(), doneBy: "page-seen" }); how = "done"; } catch {} }
+  if (!how) { gone.delete(id); card.classList.remove("leaving"); toast("Couldn't clear it. Tell the keeper instead."); return; }
+  if (ui.docs) render(ui.docs);
+  toast("Cleared", async () => {
+    try { await (how === "deleted" ? ref.set(keep) : ref.update({ state: "news", doneAt: null, doneBy: null })); gone.delete(id); if (ui.docs) render(ui.docs); }
+    catch { toast("Couldn't put it back. Ask the keeper."); }
+  });
+}
+function newsCard(id, t, where) {
+  const c = el("article", "card ncard"); c.id = where + "-" + id;
+  const h = el("div", "head"), mark = el("span", "rank"); mark.append(icon("news"));
+  const meta = el("div", "meta");
+  const b = badgeOf(id, t); if (b) meta.append(el("span", "badge", b));
+  const at = t.updatedAt || t.since; if (at) meta.append(el("span", null, sinceShort(at)));
+  h.append(mark, inline(el("span", "t-title"), t.title || id), meta);
+  const bd = el("div", "body");
+  if (t.context) { const x = el("div"); x.style.display = "grid"; x.style.gap = "8px"; x.append(block(t.context)); bd.append(x); }
+  folds(id, t, bd);
+  const shots = gallery(t.images); if (shots) bd.append(shots);
+  const links = linkRow(t.links); if (links) bd.append(links);
+  if (db && isOwner) {
+    const s = iconBtn("btn seen", "done", "Seen: clear it", "Seen"), r = el("div", "seen-row");
+    s.onclick = () => { s.disabled = true; seenNews(id, t, c); };
+    r.append(s); bd.append(r);
+  }
+  c.append(h, bd);
+  return c;
+}
+function fill(list, nodes, emptyText) { list.replaceChildren(...(nodes.length ? nodes : [el("div", "empty", emptyText)])); }
+
+// View state survives re-renders: the tab, one-at-a-time or all, which item is showing.
+// It opens on News when there is any, otherwise on Waiting (a #news, #waiting… link opens that
+// tab): Waiting at the first item when anything changed since you last looked, otherwise where
+// you left off. The same holds when you come back to a page left open.
+const ui = { tab: "waiting", focus: store.get("focus", null), showLater: false, deck: [], news: [], rows: {}, open: new Set(), moreOpen: {} };
+const TABS = ["news", "waiting", "working", "scheduled", "all"];
+const home = () => ui.news.length ? "news" : "waiting";
+function setTab(tab) {
+  ui.tab = tab;
+  for (const b of document.querySelectorAll(".tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === tab));
+  for (const p of ["news", "waiting", "working", "scheduled", "all"]) $("p-" + p).hidden = p !== tab;
+  if (tab === "news") for (const id of ui.news) markSeen(id, ui.rows[id]);
+  window.scrollTo({ top: 0 });
+}
+// Move on after an answer: to the item that came next when it was tapped. The save re-sorts
+// the list (an answered item moves to the end), so the next one is picked before saving.
+// The cards loop: after the last comes the first again.
+const wrap = (k) => { const n = ui.deck.length; return ((k % n) + n) % n; };
+const nextAfter = (id) => { const i = ui.deck.indexOf(id); return ui.deck.length > 1 ? ui.deck[wrap(i + 1)] : null; };
+// Every move to another card starts it at the top, not where the last one was scrolled to.
+function advance(next) { ui.focus = next; drawWaiting(); window.scrollTo({ top: 0 }); }
+
+// The card follows a finger, or a two-finger swipe on a trackpad, with the next or previous
+// item sliding in beside it. Let go past a quarter of the width, or flick, to move on;
+// otherwise it springs back. At either end it only gives a little.
+const GAP = 16, SLIDE_MS = 220;
+// Trackpad: horizontal wheel deltas drag the card; it settles when they stop. After a move,
+// the coasting tail of that swipe is swallowed so it doesn't skip on; a new swipe shows as
+// deltas growing again (the tail only shrinks), or a pause, and unlocks at once.
+// The listener sits on the panel, which outlives every card.
+const wheel = { lock: false, t: null, acc: 0, end: null, last: 0 };
+function onWheel(e) {
+  const sw = ui.sw; if (!sw || ui.tab !== "waiting") return;
+  const x = e.deltaX * (e.deltaMode === 1 ? 16 : 1), ax = Math.abs(x);
+  if (!wheel.acc && !wheel.lock && ax <= Math.abs(e.deltaY)) return;
+  if (e.target.closest(".shots")) return;
+  e.preventDefault();
+  if (wheel.lock && ax > Math.max(4, wheel.last * 1.6)) wheel.lock = false;
+  wheel.last = ax;
+  clearTimeout(wheel.end); wheel.end = setTimeout(() => { wheel.lock = false; wheel.last = 0; }, 120);
+  if (wheel.lock || sw.busy) return;
+  wheel.acc -= x; sw.move(wheel.acc);
+  clearTimeout(wheel.t);
+  const done = () => { wheel.acc = 0; sw.settle(false); };
+  if (Math.abs(wheel.acc) > sw.width() * 0.4) { wheel.lock = true; done(); }
+  else wheel.t = setTimeout(done, 120);
+}
+function swiper(stage, card, i) {
+  const deck = ui.deck, reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let side = 0, ghost = null, dx = 0, busy = false;
+  const w = () => card.offsetWidth + GAP;
+  const has = (s) => deck.length > 1, at = (s) => wrap(i + s);
+  function place(x, anim) {
+    const s = x < 0 ? 1 : x > 0 ? -1 : side; // 1: the next item, coming in from the right
+    if (s !== side) {
+      ghost?.remove(); ghost = null; side = s;
+      if (s && has(s)) { const j = at(s); ghost = el("article", "card peek"); ghost.append(head(deck[j], ui.rows[deck[j]], "div", j + 1), body(deck[j], ui.rows[deck[j]], false)); stage.append(ghost); }
+    }
+    const tr = anim && !reduce ? `transform ${SLIDE_MS}ms cubic-bezier(.2,.7,.3,1)` : "none";
+    card.style.transition = tr; card.style.transform = x ? `translateX(${x}px)` : "";
+    if (ghost) { ghost.style.transition = tr; ghost.style.transform = `translateX(${x + side * w()}px)`; }
+  }
+  const commit = (s) => {
+    busy = true; place(-s * w(), true);
+    setTimeout(() => { ui.focus = deck[at(s)]; drawWaiting(true); window.scrollTo({ top: 0 }); }, reduce ? 0 : SLIDE_MS);
+  };
+  return {
+    get busy() { return busy; },
+    width: () => card.offsetWidth,
+    move(x) { if (busy) return; dx = x; place(has(x < 0 ? 1 : -1) ? x : x / 3, false); },
+    settle(flick) {
+      if (busy) return; const s = dx < 0 ? 1 : -1;
+      if (dx && has(s) && (Math.abs(dx) > w() / 4 || flick)) commit(s);
+      else { dx = 0; place(0, true); setTimeout(() => { if (!busy && !dx) { ghost?.remove(); ghost = null; side = 0; } }, SLIDE_MS); }
+    },
+    to(s) { if (busy || !has(s)) return; dx = -s; place(dx, false); card.getBoundingClientRect(); commit(s); },
+  };
+}
+function drawWaiting(slid) {
+  const list = $("l-waiting"), deck = ui.deck;
+  if (!deck.length) { $("count").replaceChildren(countLine(-1)); fill(list, [], ui.later ? "Nothing else waits on you today." : "Nothing waits on you right now."); return; }
+  if (!deck.includes(ui.focus)) ui.focus = deck[0];
+  const i = deck.indexOf(ui.focus), id = ui.focus, t = ui.rows[id];
+  store.set("focus", id);
+  const card = el("article", slid ? "card" : "card enter"); card.id = "t-" + id;
+  const owner = !!(db && isOwner);
+  card.append(head(id, t, "div", i + 1), body(id, t, owner));
+  const stage = el("div", "stage"); stage.append(card);
+  const sw = ui.sw = swiper(stage, card, i);
+  // Touch: decide the axis on the first few pixels; a vertical drag stays a scroll.
+  let x0 = null, y0 = null, axis = null, last = null, before = null;
+  card.addEventListener("touchstart", (e) => {
+    x0 = null; if (sw.busy || e.touches.length > 1 || e.target.closest(".shots")) return;
+    const p = e.touches[0]; x0 = p.clientX; y0 = p.clientY; axis = null; last = before = { x: x0, t: e.timeStamp };
+  }, { passive: true });
+  card.addEventListener("touchmove", (e) => {
+    if (x0 == null) return; const p = e.touches[0], dx = p.clientX - x0, dy = p.clientY - y0;
+    if (!axis) { if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return; axis = Math.abs(dx) > Math.abs(dy) ? "x" : "y"; }
+    if (axis !== "x") return;
+    e.preventDefault(); before = last; last = { x: p.clientX, t: e.timeStamp }; sw.move(dx);
+  }, { passive: false });
+  const lift = (e) => {
+    if (x0 == null || axis !== "x") { x0 = null; return; }
+    const p = e.changedTouches[0], v = (p.clientX - before.x) / Math.max(1, e.timeStamp - before.t), x0start = x0; x0 = null;
+    sw.settle(Math.abs(v) > 0.4 && Math.sign(v) === Math.sign(p.clientX - x0start));
+  };
+  card.addEventListener("touchend", lift); card.addEventListener("touchcancel", lift);
+  // Three buttons float over the bottom of the page; moving between cards is by swipe
+  // (or a dash on top), so there are no arrows.
+  const dock = el("div", "dock"), inner = el("div", "dock-in"), rowEl = el("div", "dock-row");
+  if (owner) {
+    const q = quickButtons(id, t);
+    rowEl.append(q.go, q.later, q.say);
+    inner.append(Object.assign(el("span", "sent", notes[id] || ""), { id: "st-" + id }), rowEl);
+    dock.append(inner);
+  }
+  $("count").replaceChildren(countLine(i));
+  list.replaceChildren(...(owner ? [stage, dock] : [stage]));
+  markSeen(id, t);
+}
+const sinceShort = (iso) => { const d = new Date(iso); if (isNaN(d)) return ""; const today = new Date().toDateString() === d.toDateString();
+  return today ? d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : d.toLocaleDateString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" }); };
+// Where you are, as a row of dashes: one per item, the current one lit, a new or changed one
+// marked at its left end. Tap a dash to go there. Items put off till tomorrow sit after it as
+// ⏭ and a number; tap to show or hide them.
+function countLine(i) {
+  const bar = el("div", "dashes");
+  ui.deck.forEach((id, k) => {
+    const t = ui.rows[id], d = el("button", "dash" + (k === i ? " on" : "") + (badgeOf(id, t) ? " new" : ""));
+    d.setAttribute("aria-label", (k + 1) + " of " + ui.deck.length + ": " + nameOf(id, t) + (badgeOf(id, t) ? " (new)" : ""));
+    if (k === i) d.setAttribute("aria-current", "true");
+    d.onclick = () => { const n = k - i; if (Math.abs(n) === 1) go(n); else if (n) advance(id); };
+    bar.append(d);
+  });
+  if (ui.later) {
+    const t = iconBtn("later-n", "later", ui.showLater ? "Hide the items put off till tomorrow" : ui.later + " put off till tomorrow, show them");
+    t.append(String(ui.later)); if (ui.showLater) t.classList.add("on");
+    t.onclick = () => { ui.showLater = !ui.showLater; if (ui.docs) render(ui.docs); };
+    bar.append(t);
+  }
+  return bar;
+}
+function go(step) {
+  const i = ui.deck.indexOf(ui.focus), j = wrap(i + step);
+  if (j === i) return;
+  if (ui.tab === "waiting" && ui.sw && $("t-" + ui.focus)?.isConnected) { ui.sw.to(step); return; }
+  ui.focus = ui.deck[j]; drawWaiting();
+  window.scrollTo({ top: 0 });
+}
+
+function render(docs) {
+  const all = docs.map((s) => [s.id, s.data() || {}]);
+  const by = (st) => all.filter(([, t]) => t.state === st);
+  const now = new Date().toISOString();
+  const waitingAll = by("waiting").sort((a, b) => (a[1].rank ?? 99) - (b[1].rank ?? 99));
+  const later = waitingAll.filter(([, t]) => t.snoozeUntil && t.snoozeUntil > now);
+  const shown = ui.showLater ? waitingAll : waitingAll.filter(([, t]) => !(t.snoozeUntil && t.snoozeUntil > now));
+  // Order: wrap-ups first, to clear them out of the way; then what you've been discussing
+  // with the keeper in the last few hours (activeAt, latest first); then by priority.
+  const recent = (t) => t.activeAt && Date.now() - Date.parse(t.activeAt) < 3 * 3600e3 ? t.activeAt : "";
+  const tier = (t) => t.kind === "close" ? 0 : recent(t) ? 1 : 2;
+  const ordered = [...shown].sort((a, b) => tier(a[1]) - tier(b[1]) || recent(b[1]).localeCompare(recent(a[1])) || (a[1].rank ?? 99) - (b[1].rank ?? 99));
+  ui.rows = Object.fromEntries(all); ui.later = later.length; ui.docs = docs;
+  ui.fresh = waitingAll.filter(([id, t]) => badgeOf(id, t)).length;
+  ui.deck = ordered.map(([id]) => id);
+  // News, newest first; one cleared here leaves at once.
+  const news = by("news").filter(([id]) => !gone.has(id)).sort((a, b) => String(b[1].updatedAt || b[1].since || "").localeCompare(String(a[1].updatedAt || a[1].since || "")));
+  ui.news = news.map(([id]) => id);
+  const working = by("working").sort((a, b) => String(b[1].workingSince || b[1].updatedAt || "").localeCompare(String(a[1].workingSince || a[1].updatedAt || "")));
+  const scheduled = by("scheduled").sort((a, b) => String(a[1].when).localeCompare(String(b[1].when)));
+  // Done items stay on the page for a day (2026-10-24).
+  const dayAgo = Date.now() - 864e5;
+  const done = by("done").filter(([, t]) => !t.doneAt || Date.parse(t.doneAt) >= dayAgo).sort((a, b) => String(b[1].doneAt).localeCompare(String(a[1].doneAt)));
+
+  // First visit on this device: everything counts as seen, so nothing is badged.
+  if (!seen0 && !render.seeded) { render.seeded = true; for (const [id, t] of all) seen[id] = stampOf(t); store.set("seen", seen); pushSeen(); }
+
+  const sig = [...ui.news, ...ui.deck].map((id) => id + "@" + stampOf(ui.rows[id])).join(",");
+  $("tab-news").hidden = !news.length; $("n-news").textContent = news.length;
+  $("a-news-box").hidden = !news.length;
+  fill($("l-news"), news.map(([id, t]) => newsCard(id, t, "n")), "Nothing new.");
+  fill($("a-news"), news.map(([id, t]) => newsCard(id, t, "an")), "Nothing new.");
+  if (!render.opened) {
+    render.opened = true; if (ui.deck.some((id) => badgeOf(id, ui.rows[id]))) ui.focus = ui.deck[0];
+    const h = location.hash.slice(1);
+    setTab(TABS.includes(h) && (h !== "news" || news.length) ? h : home());
+  }
+  else if (ui.tab === "news" && !news.length) setTab("waiting");
+  else if (ui.tab === "news") for (const id of ui.news) markSeen(id, ui.rows[id]);
+  else if (document.hidden && sig !== ui.sig) ui.backToTop = true;
+  ui.sig = sig;
+  drawWaiting();
+  const workRows = (where) => working.map(([id, t], i) => listCard(id, t, i + 1, where)), schedRows = () => scheduled.map(([id, t]) => row(id, t, when(t.when))), doneRows = () => done.map(([id, t]) => row(id, t, t.doneAt ? day(t.doneAt) : ""));
+  fill($("l-working"), workRows("w"), "Nothing in progress.");
+  fill($("l-scheduled"), schedRows(), "Nothing scheduled.");
+  fill($("a-waiting"), waitingAll.map(([id, t], i) => listCard(id, t, i + 1, "a")), "Nothing waits on you right now.");
+  fill($("a-working"), workRows("aw"), "Nothing in progress.");
+  fill($("a-scheduled"), schedRows(), "Nothing scheduled.");
+  $("n-waiting").textContent = shown.length; $("n-working").textContent = working.length;
+  $("n-scheduled").textContent = scheduled.length; 
+  const latest = all.map(([, t]) => t.updatedAt).filter(Boolean).sort().pop();
+  $("stamp").textContent = latest ? "Last changed " + when(latest) : "";
+
+  const target = location.hash.startsWith("#t-") && location.hash.slice(3);
+  if (target && !render.jumped && ui.rows[target]) {
+    render.jumped = true;
+    if (ui.rows[target].state === "news") { openCard(target); return; }
+    setTab("waiting"); ui.focus = target; drawWaiting();
+  }
+}
+
+(async () => {
+  for (const b of document.querySelectorAll(".tabs button")) b.prepend(icon(b.dataset.tab));
+  for (const b of document.querySelectorAll(".tabs button")) b.onclick = () => setTab(b.dataset.tab);
+  $("p-waiting").addEventListener("wheel", onWheel, { passive: false });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden || !ui.backToTop) return;
+    ui.backToTop = false; setTab(home()); if (ui.deck.length) advance(ui.deck[0]);
+  });
+  setTab(ui.tab);
+  applyLook(null);
+  const [d, u] = await Promise.all([window.claude?.use?.("db"), window.claude?.use?.("user")]);
+  db = d ?? null; isOwner = (await u?.isOwner?.()) ?? false;
+  cm = await window.claude?.use?.("comments") ?? null;
+  if (!db) { $("count").textContent = "Open in claude.ai, signed in, to see the list"; return; }
+  db.collection("settings").doc("look").onSnapshot((s) => applyLook(s.exists ? s.data() : null), () => {});
+  db.collection("inbox").onSnapshot((snap) => drawInbox(snap.docs), () => {});
+  if (isOwner) { assets = await window.claude?.use?.("assets").catch?.(() => null) ?? null; setupNoteBox(); }
+  await loadSeen(u);
+  let last = null;
+  db.collection("tasks").onSnapshot((snap) => { last = snap.docs; render(last); }, () => { $("count").textContent = "The list stopped updating. Reload the page."; });
+  // Later items come back on their own at 9:00 without a reload.
+  setInterval(() => { if (last) render(last); }, 5 * 60e3);
+})();
+</script>
+
+</body></html>

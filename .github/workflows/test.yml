@@ -1,0 +1,26 @@
+name: test
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: desk.py
+        run: python3 -m unittest discover -s skills/desk -v
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Playwright
+        run: |
+          npm install -g playwright@1.48.2
+          npx -y playwright@1.48.2 install --with-deps chromium
+      - name: The page
+        run: |
+          export NODE_PATH=$(npm root -g)
+          for t in page/tests/news.mjs page/tests/deps.mjs page/tests/desk.mjs; do node $t "$RUNNER_TEMP"; done
