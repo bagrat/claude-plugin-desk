@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -380,6 +381,43 @@ class News(Base):
         self.put("n2", news())
         _, out, _ = self.run_cli("footer", self.dir, "--now", NOW)
         self.assertEqual(out.strip(), "[✦ 2 ··· ● 1 ··· ◌ 1](https://claude.ai/artifact/DESKTEST#news)")
+
+    def test_a_stale_dump_is_refused(self):
+        # #21: Seen deleted the news row after the dump was read; the old dump must not count it.
+        self.put("a", waiting())
+        self.put("n1", news())
+        old = time.time() - 5 * 60
+        for f in self.dir.glob("*.json"):
+            os.utime(f, (old, old))
+        code, out, err = self.run_cli("footer", self.dir, "--now", NOW)
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("rows read 5 min ago: read them fresh", err)
+        code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-rules")
+        self.assertEqual(code, 1)
+        self.assertIn("rows read 5 min ago: read them fresh", out)
+        self.assertNotIn("✦", out)
+        # A row left over from an older read into the same directory is stale too.
+        self.put("b", working())
+        self.assertEqual(self.run_cli("footer", self.dir, "--now", NOW)[0], 1)
+        # Written fresh: counted.
+        for f in self.dir.glob("*.json"):
+            os.utime(f)
+        code, out, _ = self.run_cli("footer", self.dir, "--now", NOW)
+        self.assertEqual(code, 0)
+        self.assertIn("[✦ 1 ··· ● 1 ··· ◌ 1]", out)
+        os.utime(self.dir / "a.json", (old, old))
+        self.assertEqual(self.run_cli("footer", self.dir, "--now", NOW, "--max-age", 10)[0], 0)
+
+    def test_a_stale_note_stops_prep_too(self):
+        self.put("a", waiting())
+        d = self.root / "dump" / "inbox"
+        d.mkdir()
+        (d / "n-1.json").write_text(json.dumps({"text": "x", "from": "page", "at": NOW}))
+        old = time.time() - 3 * 60
+        os.utime(d / "n-1.json", (old, old))
+        code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-rules")
+        self.assertEqual(code, 1)
+        self.assertIn("rows read 3 min ago", out)
 
     def test_order_and_prep_list_news_first(self):
         self.put("a", waiting(title="A card"))
