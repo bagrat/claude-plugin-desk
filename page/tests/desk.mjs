@@ -1,5 +1,5 @@
 // The Desk's own parts: its look (theme and icon, live from settings/look), the Inbox strip and
-// the note box, the keeper link. Run: node page/tests/desk.mjs [shots-dir]
+// the note tab, the keeper link. Run: node page/tests/desk.mjs [shots-dir]
 import { browser, open, ok, done } from './harness.mjs';
 import fs from 'fs';
 const out = process.argv[2] || '/tmp';
@@ -14,7 +14,13 @@ const b = await browser();
   ok(await s.p.$eval('#logo', (n) => n.className + '|' + n.textContent) === 'logo letter|W', 'default icon: its first letter');
   ok(await s.p.evaluate(() => document.documentElement.dataset.deskTheme) === 'frost' && await accent(s.p) === '#88c0d0', 'default theme: Frost (dark accent)');
   ok(!(await s.p.$('#strip:not([hidden])')), 'no notes: no strip');
-  ok(await s.p.$eval('#note-box', (n) => !n.hidden), 'owner: the note box shows');
+  ok(await s.p.$eval('#tab-note', (n) => !n.hidden), 'owner: the note tab shows');
+  ok(await s.p.$eval('.tabs', (n) => n.lastElementChild.id) === 'tab-note', 'the note tab is last');
+  ok(await s.p.$eval('#note-box', (n) => n.closest('[role=tabpanel]')?.id) === 'p-note', 'the note box is in its own tab');
+  ok(!(await s.p.isVisible('#note-box')), 'no note box above the cards');
+  await s.p.click('#tab-note');
+  ok(await s.p.isVisible('#note-text') && await s.p.isVisible('#note-send') && !(await s.p.isVisible('#p-waiting')), 'the note tab shows the box, not the cards');
+  await s.p.click('#tab-waiting');
   await s.p.click('#t-ship-date .more > summary');
   ok(!(await s.p.$('a.btn:has-text("Open the keeper")')), 'no keeper: no keeper link');
   ok(s.errs.length === 0, 'no errors ' + s.errs.join(' ')); await s.ctx.close(); }
@@ -49,7 +55,8 @@ for (const scheme of ['dark', 'light']) {
   ok(await s.p.textContent('#strip-n') === '2 notes being sorted', 'strip: count');
   ok(JSON.stringify(await s.p.$$eval('#strip-l li > div', (l) => l.map((x) => x.textContent))) === '["First","Second"]', 'strip: oldest first');
   ok(/from this page · 1 image/.test(await s.p.textContent('#strip-l li >> nth=0')), 'strip: where from, and images');
-  await s.p.click('#note-box > summary');
+  ok(await s.p.$eval('#strip', (n) => !n.closest('[role=tabpanel]')) && await s.p.isVisible('#strip'), 'the strip stays above the cards');
+  await s.p.click('#tab-note');
   await s.p.fill('#note-text', 'Make the swipe less eager');
   await s.p.setInputFiles('#note-pick', { name: 'shot.png', mimeType: 'image/png', buffer: fs.readFileSync(new URL('../../README.md', import.meta.url)) }).catch(() => {});
   await s.p.click('#note-send'); await s.p.waitForTimeout(300);
@@ -58,15 +65,18 @@ for (const scheme of ['dark', 'light']) {
   ok(set && set[3].text === 'Make the swipe less eager' && set[3].from === 'page' && /^n-\d{14}-[0-9a-f]{4}$/.test(set[2]), 'the note saves to the inbox');
   ok(set && set[3].images?.[0]?.id === 'f'.repeat(32) && log.some((e) => e[0] === 'upload'), 'its screenshot uploads with it');
   ok(log.some((e) => e[0] === 'comment' && e[1].startsWith('[Desk note] Make the swipe less eager')), 'a comment wakes the keeper');
+  ok(/Note sent to the keeper/.test(await s.p.textContent('body')), 'it says the note was sent');
   ok(await s.p.textContent('#strip-n') === '3 notes being sorted' && await s.p.inputValue('#note-text') === '', 'the strip shows it; the box clears');
   await s.p.screenshot({ path: `${out}/inbox.png` });
   await s.p.evaluate(() => { window.__put('inbox', 'n-1', null); window.__put('inbox', 'n-2', null); }); await s.p.waitForTimeout(150);
   ok(await s.p.textContent('#strip-n') === '1 note being sorted', 'sorted notes leave the strip');
   ok(s.errs.length === 0, 'no errors ' + s.errs.join(' ')); await s.ctx.close(); }
 
-// Not the owner: no note box; no assets: no screenshot button.
-{ const s = await open(b, { db: { tasks }, owner: false });
-  ok(await s.p.$eval('#note-box', (n) => n.hidden), 'not the owner: no note box'); await s.ctx.close(); }
+// Not the owner: no note tab, and #note doesn't open it; no assets: no screenshot button.
+{ const s = await open(b, { db: { tasks }, owner: false, hash: '#note' });
+  ok(await s.p.$eval('#tab-note', (n) => n.hidden) && !(await s.p.isVisible('#note-box')), 'not the owner: no note tab'); await s.ctx.close(); }
+{ const s = await open(b, { db: { tasks }, hash: '#note' });
+  ok(await s.p.isVisible('#note-text'), 'owner: #note opens the note tab'); await s.ctx.close(); }
 { const s = await open(b, { db: { tasks }, assets: false });
   ok(await s.p.$eval('#note-pick-l', (n) => n.hidden), 'no assets: no screenshot button'); await s.ctx.close(); }
 await done(b);
