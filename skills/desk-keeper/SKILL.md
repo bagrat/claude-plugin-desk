@@ -34,8 +34,9 @@ Every time, in this order:
 4. Make this turn's changes with `move`, `images`, `rank`, `dep`, and send the entries they
    print with ArtifactData `update` / `delete` / `batch`, pinned to the versions from step 1.
 5. `python3 $S prep <dir> --sessions <scratch>/sessions.json`. When it stops with "the rules
-   changed", re-read each file it lists, republish the page if it says the page changed, run
-   `loaded`, and run `prep` again. Fix every problem it prints: a
+   changed", re-read each file it lists, republish the page if it says the page changed (on a
+   refusal that hands back the live page, merge onto it and publish again until it goes
+   through), run `loaded`, and run `prep` again. Fix every problem it prints: a
    blocked child gets a push to the owner at once, with its session link and the exact thing
    to approve; new waiting cards get one push naming them, then `pushed`.
 6. End the message with a horizontal rule and the footer line `prep` printed, as is.

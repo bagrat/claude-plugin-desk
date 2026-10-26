@@ -88,7 +88,9 @@ pull changed `CLAUDE.md`, `memory/MEMORY.md`, `.claude/skills/`, `.claude/desk.j
 `skills/` or `page/desk.html` since then, it stops: exit 1, no deck, no footer. Re-read each
 file (load a changed skill again) and run `loaded`. When the page template changed, republish
 the Desk in place too: `page --out <file>`, then Artifact publish with the Desk's `url` (the
-cards, notes and look live in its database and stay).
+cards, notes and look live in its database and stay). If the publish is refused and hands
+back the live page (often twice on the first switch), merge onto it and publish again until it
+goes through.
 
 **Updating.** New Desk rules arrive by `/desk:update` (the `update` skill): it pulls
 `~/.claude/desk` and does the above in one go. The keeper runs it when the Desk orchestrator

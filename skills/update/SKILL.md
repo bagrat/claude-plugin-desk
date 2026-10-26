@@ -12,6 +12,7 @@ You must be this Desk's keeper (rule 11). `S=<the desk skill's directory>/desk.p
    the project's and each `watch` clone. Exit 0 with "Desk is current": skip to step 4.
 2. Re-read each file it names; load each changed skill again. When it says the page changed,
    republish the Desk in place: `python3 $S page --out <scratch>/desk.html`, then Artifact
-   publish to the Desk's `url` (the cards, notes and look stay in its database).
+   publish to the Desk's `url` (the cards, notes and look stay in its database). On a refusal
+   that hands back the live page, merge onto it and publish again until it goes through.
 3. `python3 $S loaded`.
 4. Tell the owner in one line what changed (or that Desk was already current).
