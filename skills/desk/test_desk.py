@@ -1,7 +1,6 @@
 """Tests for desk.py. Run: python3 -m unittest discover -s skills/desk (or pytest)."""
 
 import io
-import itertools
 import os
 import json
 import re
@@ -24,12 +23,13 @@ S1 = "https://claude.ai/code/session_01AAAA"
 S2 = "https://claude.ai/code/session_01BBBB"
 
 
-NUMS = itertools.count(1)
+# Rule 3: enough context that a card can be decided from scratch.
+FULL = "The background, the options and their trade-offs, and where it stands. " * 5
 
 
 def waiting(**kw):
-    row = {"state": "waiting", "kind": "decide", "title": "T", "ask": "Which?", "recommend": "This one.",
-           "pushedAt": "2026-10-25T11:00:00Z", "num": next(NUMS)}
+    row = {"state": "waiting", "kind": "decide", "title": "T", "context": FULL, "ask": "Which?",
+           "recommend": "This one.", "pushedAt": "2026-10-25T11:00:00Z", "rank": 1}
     row.update(kw)
     return row
 
@@ -138,18 +138,47 @@ class Order(Base):
         deck = [r.id for r in tasks.ordered(tasks.load_rows(self.dir), tasks.parse_time(NOW))]
         self.assertEqual(deck, ["wrap", "talked-later", "talked", "low", "mid", "old-talk"])
 
-    def test_rank_blocking_then_kind_and_hand_rank_kept(self):
-        self.put("check", waiting(kind="check", blocks="x", rank=1))
-        self.put("review", waiting(kind="review", blocks="x", rank=5))
-        self.put("decide", waiting(kind="decide", blocks="x", rank=2))
-        self.put("free-review", waiting(kind="review", rank=3))
-        self.put("bumped", waiting(kind="info", rank=0.5, rankByHand=True))
-        ranks = tasks.reranked(tasks.load_rows(self.dir))
-        self.assertEqual(ranks, {"review": 1, "decide": 2, "check": 3, "free-review": 4})
+    def test_rank_puts_a_card_where_the_keeper_says_and_never_reorders_the_rest(self):
+        # Rule 7: the keeper's priority is the order; no formula moves a card it ranked.
+        self.put("review", waiting(kind="review", blocks="x", rank=3))
+        self.put("check", waiting(kind="check", rank=1))
+        self.put("decide", waiting(kind="decide", rank=2))
+        self.put("customer", waiting(kind="decide", rank=11))
+        self.put("held", waiting(kind="review", rank=1, heldAt="2026-10-01T09:00:00Z"))
         code, out, _ = self.run_cli("rank", self.dir)
-        entries = json.loads(out)
-        self.assertEqual({e["doc_id"] for e in entries}, {"review", "check", "free-review"})  # decide stays 2
-        self.assertEqual(self.row("review")["rank"], 1)
+        self.assertEqual((code, json.loads(out)), (0, []))  # nothing to reorder on its own
+        code, out, err = self.run_cli("rank", self.dir, "customer", "1")
+        self.assertEqual(code, 0, err)
+        self.assertEqual({e["doc_id"] for e in json.loads(out)}, {"customer", "check", "decide", "review"})
+        ranks = {r: self.row(r)["rank"] for r in ("customer", "check", "decide", "review", "held")}
+        self.assertEqual(ranks, {"customer": 1, "check": 2, "decide": 3, "review": 4, "held": 1})
+        deck = [r.id for r in tasks.ordered(tasks.load_rows(self.dir), tasks.parse_time(NOW))]
+        self.assertEqual(deck, ["customer", "check", "decide", "review"])
+
+    def test_rank_moves_a_card_down_and_leaves_unranked_cards_alone(self):
+        self.put("a", waiting(rank=1))
+        self.put("b", waiting(rank=2))
+        self.put("c", waiting(rank=3))
+        new = waiting(); new.pop("rank")
+        self.put("new", new)
+        self.assertTrue(any("no priority yet" in m for m in self.msgs("new")))
+        code, out, err = self.run_cli("rank", self.dir)
+        self.assertIn("new: no priority yet", err)
+        self.run_cli("rank", self.dir, "a", "3")
+        self.assertEqual([self.row(r)["rank"] for r in "abc"], [3, 1, 2])
+        self.assertNotIn("rank", self.row("new"))
+        self.run_cli("rank", self.dir, "new", "2")
+        self.assertEqual([self.row(r)["rank"] for r in ("b", "new", "c", "a")], [1, 2, 3, 4])
+        self.assertEqual(self.msgs("new"), [])
+
+    def test_rank_refuses_a_card_not_in_the_deck(self):
+        self.put("w", working())
+        self.put("h", waiting(heldAt="2026-10-01T09:00:00Z"))
+        for rid in ("w", "h"):
+            code, _, err = self.run_cli("rank", self.dir, rid, "1")
+            self.assertEqual(code, 2, rid)
+        code, _, err = self.run_cli("rank", self.dir, "h")
+        self.assertEqual(code, 2)
 
 
 class OwnerZone(Base):
@@ -251,7 +280,7 @@ class Checks(Base):
     def test_points_at_the_chat(self):
         self.put("a", waiting(context="The rest is in the chat above."))
         self.put("b", waiting(details=[{"title": "x", "text": "See the chat for the boards."}]))
-        self.put("c", waiting(context='Never write "see the chat" on a card.'))  # a quote, not a pointer
+        self.put("c", waiting(context='Never write "see the chat" on a card. ' + FULL))  # a quote, not a pointer
         self.assertTrue(any("points at the chat" in m for m in self.msgs("a")))
         self.assertTrue(any("details[0] points at the chat" in m for m in self.msgs("b")))
         self.assertEqual(self.msgs("c"), [])
@@ -394,9 +423,10 @@ class Move(Base):
         raw = json.loads((self.dir / "a.json").read_text())
         self.assertIsNone(raw["version"])
         self.assertNotIn("answer", raw["data"])
-        # Newly waiting: the only thing left is its push (rule 13).
-        m, = self.msgs("a")
-        self.assertIn("rule 13", m)
+        # Newly waiting: what's left is its push (rule 13) and the keeper's priority for it (rule 7).
+        push, rank = sorted(self.msgs("a"), key=lambda m: "rule 7" in m)
+        self.assertIn("rule 13", push)
+        self.assertIn("rank $R a N", rank)
 
     def test_waiting_after_an_answer_needs_a_new_ask(self):
         self.put("a", working(ask="Old?", recommend="Old.", answer="Go"))
@@ -438,56 +468,49 @@ class Move(Base):
 
 
 class Numbers(Base):
-    """A Waiting card's number: given once, kept while the card lives, so "#3" always names it."""
+    """A card's number is its place in the order (rule 1), not a stored id: 0.2.9's `num` goes."""
 
-    def test_move_to_waiting_gives_the_next_number(self):
-        self.put("a", waiting(num=4))
-        self.put("b", working(num=7))
+    def test_move_to_waiting_gives_no_number(self):
         self.put("c", working())
         code, out, err = self.run_cli("move", self.dir, "c", "waiting", "--now", NOW, "--ask", "Q?", "--recommend", "R.")
         self.assertEqual(code, 0, err)
-        self.assertEqual(json.loads(Path(json.loads(out)[0]["file_path"]).read_text())["num"], 8)
-        self.assertEqual(self.row("c")["num"], 8)
-
-    def test_number_stays_through_moves(self):
-        self.put("a", waiting(num=3))
-        self.put("b", waiting(num=9))
-        _, out, _ = self.run_cli("move", self.dir, "a", "working", "--now", NOW, "--note", "x")
         self.assertNotIn("num", json.loads(Path(json.loads(out)[0]["file_path"]).read_text()))
-        _, out, _ = self.run_cli("move", self.dir, "a", "waiting", "--now", NOW, "--ask", "New?", "--recommend", "R.")
-        self.assertNotIn("num", json.loads(Path(json.loads(out)[0]["file_path"]).read_text()))
-        self.assertEqual(self.row("a")["num"], 3)
+        self.assertNotIn("num", self.row("c"))
 
-    def test_held_card_gets_a_number_too(self):
-        self.put("a", waiting(num=2))
-        self.put("b", working())
-        _, out, err = self.run_cli("move", self.dir, "b", "held", "--now", NOW, "--ask", "Q?", "--recommend", "R.")
-        self.assertEqual(self.row("b")["num"], 3, err)
-
-    def test_news_drops_the_number(self):
-        self.put("a", waiting(num=3))
-        _, out, _ = self.run_cli("move", self.dir, "a", "news", "--now", NOW)
-        self.assertEqual(json.loads(Path(json.loads(out)[0]["file_path"]).read_text())["num"], {"__delete__": True})
-
-    def test_rank_numbers_waiting_cards_without_one(self):
-        self.put("a", waiting(num=2, rank=2))
-        old = waiting(rank=1); old.pop("num")
-        self.put("b", old)
-        self.assertIn("rank", " ".join(self.msgs("b")))
+    def test_leftover_num_and_rank_by_hand_are_flagged_and_dropped(self):
+        self.put("a", waiting(num=3, rankByHand=True))
+        self.put("n", {"state": "news", "title": "Shipped", "num": 4})
+        self.assertTrue(any("carries num, rankByHand" in m for m in self.msgs("a")))
+        self.assertTrue(any("carries num" in m for m in self.msgs("n")))
         code, out, _ = self.run_cli("rank", self.dir)
         self.assertEqual(code, 0)
-        self.assertEqual(self.row("b")["num"], 3)
-        self.assertEqual(self.msgs("b"), [])
+        patches = {e["doc_id"]: json.loads(Path(e["file_path"]).read_text()) for e in json.loads(out)}
+        self.assertEqual(patches["a"], {"num": {"__delete__": True}, "rankByHand": {"__delete__": True}})
+        self.assertEqual(patches["n"], {"num": {"__delete__": True}})
+        self.assertEqual(self.msgs("a") + self.msgs("n"), [])
 
-    def test_two_cards_one_number_is_flagged(self):
-        self.put("a", waiting(num=5))
-        self.put("b", working(num=5))
-        self.assertTrue(any("#5" in m for m in self.msgs("b")))
-
-    def test_order_names_cards_by_number(self):
-        self.put("a", waiting(num=12, handle="ship-date", title="Pick the ship date"))
+    def test_order_shows_places_not_numbers(self):
+        self.put("b", waiting(num=12, rank=2, handle="ship-date", title="Pick the ship date"))
+        self.put("a", waiting(num=13, rank=1, handle="logo", title="Pick the logo"))
         _, out, _ = self.run_cli("order", self.dir, "--now", NOW)
-        self.assertIn("1. #12 ship-date", out)
+        self.assertIn("1. logo [decide]", out)
+        self.assertIn("2. ship-date [decide]", out)
+        self.assertNotIn("#", out)
+
+
+class FullContext(Base):
+    """Rule 3: a waiting card holds everything; a thin one, with no folds, is flagged."""
+
+    def test_thin_card_is_flagged(self):
+        self.put("thin", waiting(context="Pick one."))
+        self.put("bare", waiting(context=None))
+        self.put("folded", waiting(context="Short.", details=[{"title": "The options", "text": "…"}]))
+        self.put("full", waiting())
+        self.put("step", waiting(kind="step", context="", links=[{"label": "Form", "url": "https://example.test/f"}]))
+        self.assertTrue(any("thin card" in m for m in self.msgs("thin")))
+        self.assertTrue(any("thin card" in m for m in self.msgs("bare")))
+        for rid in ("folded", "full", "step"):
+            self.assertEqual(self.msgs(rid), [], rid)
 
 
 class Steps(Base):
@@ -599,7 +622,7 @@ class Held(Base):
         rows, now = tasks.load_rows(self.dir), tasks.parse_time(NOW)
         self.assertEqual([r.id for r in tasks.ordered(rows, now)], ["a"])
         self.assertEqual(tasks.counts(rows, now), (1, 0))
-        self.assertEqual(tasks.reranked(rows), {"a": 1})
+        self.assertEqual(tasks.placed(rows, "a", 1), {"a": 1})
         _, out, _ = self.run_cli("order", self.dir, "--now", NOW)
         self.assertIn("Later:", out)
         self.assertIn("review when you ask", out)

@@ -93,11 +93,27 @@ for (const scheme of ['dark', 'light']) {
   await s.p.click('#tab-all');
   ok(/review when you ask/i.test(await s.p.textContent('#a-big-review')), 'held: marked in All too');
   ok(s.errs.length === 0, 'no errors ' + s.errs.join(' ')); await s.ctx.close(); }
-// A Waiting card's number names it, not its place: the head shows "#7" and the spoken name says it.
-{ const s = await open(b, { db: { tasks: { 'ship-date': { ...tasks['ship-date'], num: 7 }, 'old-card': { ...tasks['ship-date'], title: 'No number yet', rank: 2 } } } });
-  ok(await s.p.textContent('#t-ship-date .rank') === '#7', 'the head shows the card\'s number');
-  ok(/say “Pick the ship date” or “#7”/.test(await s.p.textContent('#t-ship-date .say')), 'the spoken name gives the number');
+// A card's number is its place in the keeper's order (1, 2, 3…), not an id: an old row's
+// stored num is ignored, and the spoken name is the title alone.
+{ const s = await open(b, { db: { tasks: { 'ship-date': { ...tasks['ship-date'], num: 13, rank: 2 }, 'first': { ...tasks['ship-date'], title: 'Ranked first', rank: 1 } } } });
+  ok(await s.p.textContent('#t-first .rank') === '1', 'the first card in the keeper\'s order shows 1');
+  ok(/say “Ranked first”$/.test(await s.p.textContent('#t-first .say')), 'the spoken name has no number');
   await s.p.click('#tab-all');
-  ok(await s.p.textContent('#a-ship-date .rank') === '#7' && await s.p.textContent('#a-old-card .rank') === '2', 'in the list too; no number: its place');
+  ok(await s.p.textContent('#a-first .rank') === '1' && await s.p.textContent('#a-ship-date .rank') === '2', 'in the list: positions, the stored num ignored');
+  await s.p.evaluate((r) => window.__put('tasks', 'ship-date', r), { ...tasks['ship-date'], rank: 0 }); await s.p.waitForTimeout(150);
+  ok(await s.p.textContent('#a-ship-date .rank') === '1' && await s.p.textContent('#a-first .rank') === '2', 'the keeper re-ranks: the positions follow');
+  ok(s.errs.length === 0, 'no errors ' + s.errs.join(' ')); await s.ctx.close(); }
+// The ask comes first: the ask and the recommendation above the context and the folds; bare
+// links in the context, folds, ask and recommendation are links.
+{ const t = { ...tasks['ship-date'], ask: 'Approve https://example.test/pr/1?', recommend: 'Yes, see https://example.test/r.',
+    context: 'Background at https://example.test/doc, and [a label](https://example.test/l).', details: [{ title: 'More', text: '- spec: https://example.test/spec' }] };
+  const s = await open(b, { db: { tasks: { 'ship-date': t } } });
+  const order = await s.p.$$eval('#t-ship-date .body > *', (l) => l.map((n) => n.textContent.slice(0, 18)));
+  const at = (w) => order.findIndex((x) => x.startsWith(w));
+  ok(at('The ask') === 0 && at('Recommended') === 1 && at('What this is') > 1 && at('More') > at('What this is'), 'order: ask, recommended, context, folds ' + JSON.stringify(order));
+  const hrefs = await s.p.$$eval('#t-ship-date .body a', (l) => l.map((a) => a.getAttribute('href') + '|' + a.textContent));
+  for (const h of ['https://example.test/pr/1|https://example.test/pr/1', 'https://example.test/r|https://example.test/r', 'https://example.test/doc|https://example.test/doc', 'https://example.test/l|a label', 'https://example.test/spec|https://example.test/spec'])
+    ok(hrefs.includes(h), 'linked: ' + h);
+  ok(/example\.test\/pr\/1\?/.test(await s.p.textContent('#t-ship-date .ask')), 'the trailing “?” stays text');
   ok(s.errs.length === 0, 'no errors ' + s.errs.join(' ')); await s.ctx.close(); }
 await done(b);
