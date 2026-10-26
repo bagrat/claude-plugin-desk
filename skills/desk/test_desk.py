@@ -422,6 +422,63 @@ class Pushes(Base):
         self.assertEqual(patch["pushedAt"], {"__delete__": True})
 
 
+class Held(Base):
+    """A review held until the owner asks: on the page under Later, no push, no rank, no count."""
+
+    def test_move_held_parks_it(self):
+        self.put("r", waiting(kind="review", rank=1, activeAt=NOW, snoozeUntil="2026-10-26T05:00:00Z"), version=3)
+        code, out, err = self.run_cli("move", self.dir, "r", "held", "--now", NOW)
+        self.assertEqual(code, 0, err)
+        entry, = json.loads(out)
+        self.assertEqual(entry["if_version"], 3)
+        patch = json.loads(Path(entry["file_path"]).read_text())
+        self.assertEqual(patch["state"], "waiting")
+        self.assertEqual(patch["heldAt"], NOW)
+        self.assertEqual(patch["snoozeUntil"], {"__delete__": True})
+        self.assertEqual(patch["activeAt"], {"__delete__": True})
+
+    def test_held_needs_an_ask(self):
+        self.put("r", working())
+        code, _, err = self.run_cli("move", self.dir, "r", "held", "--now", NOW)
+        self.assertEqual(code, 2)
+        self.assertIn("ask", err)
+
+    def test_held_is_out_of_the_deck_the_count_and_the_ranks(self):
+        self.put("a", waiting(rank=2))
+        self.put("r", waiting(kind="review", rank=1, heldAt="2026-10-01T09:00:00Z"))
+        rows, now = tasks.load_rows(self.dir), tasks.parse_time(NOW)
+        self.assertEqual([r.id for r in tasks.ordered(rows, now)], ["a"])
+        self.assertEqual(tasks.counts(rows, now), (1, 0))
+        self.assertEqual(tasks.reranked(rows), {"a": 1})
+        _, out, _ = self.run_cli("order", self.dir, "--now", NOW)
+        self.assertIn("Later:", out)
+        self.assertIn("review when you ask", out)
+
+    def test_held_for_weeks_is_never_flagged(self):
+        self.put("r", waiting(kind="review", pushedAt=None, heldAt="2026-09-01T09:00:00Z",
+                              updatedAt="2026-09-01T09:00:00Z"))
+        self.assertEqual(self.msgs("r"), [])
+
+    def test_back_when_asked_needs_no_push(self):
+        self.put("r", waiting(kind="review", pushedAt=None, heldAt="2026-10-01T09:00:00Z"))
+        code, out, err = self.run_cli("move", self.dir, "r", "waiting", "--now", NOW)
+        self.assertEqual(code, 0, err)
+        patch = json.loads(Path(json.loads(out)[0]["file_path"]).read_text())
+        self.assertEqual(patch["heldAt"], {"__delete__": True})
+        self.assertEqual(patch["activeAt"], NOW)
+        self.assertEqual(patch["pushedAt"], NOW)
+        self.assertEqual(self.msgs("r"), [])
+        rows = tasks.load_rows(self.dir)
+        self.assertEqual([r.id for r in tasks.ordered(rows, tasks.parse_time(NOW))], ["r"])
+
+    def test_other_moves_drop_the_hold(self):
+        for to, extra in (("working", ["--session", S1]), ("news", [])):
+            self.put("r", waiting(kind="review", heldAt="2026-10-01T09:00:00Z"))
+            _, out, err = self.run_cli("move", self.dir, "r", to, "--now", NOW, *extra)
+            patch = json.loads(Path(json.loads(out)[0]["file_path"]).read_text())
+            self.assertEqual(patch["heldAt"], {"__delete__": True}, to)
+
+
 def news(**kw):
     row = {"state": "news", "title": "v0.9 is out", "context": "The release is published.",
            "since": "2026-10-25T09:00:00Z", "updatedAt": "2026-10-25T11:00:00Z"}

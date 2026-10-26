@@ -47,6 +47,16 @@ owner may have cleared news since):
    to approve; new waiting cards get one push naming them, then `pushed`.
 6. End the message with a horizontal rule and the footer line `prep` printed, as is.
 
+## Reviews the owner isn't ready for
+
+When the owner puts a review off with no date ("not now", "later", "when I ask"), hold it
+(`move <id> held`, rule 10) rather than snoozing it again and again; never push about a held
+card. When they ask for it ("let's do the review", its name), `move <id> waiting` it, then send
+its images into the chat as files with SendUserFile (`display: "render"`, each with its caption;
+download them from the page's asset store with Artifact `read`, `url` the page, `path` the
+image id), fold by fold in the card's order, with the card's ask and recommendation, so they
+can review on the phone without opening the page.
+
 ## New Desk rules
 
 When the Desk orchestrator says a fix merged, or `prep` says Desk has an update, run

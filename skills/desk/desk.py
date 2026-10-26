@@ -44,15 +44,17 @@ KINDS = {"decide", "review", "check", "do", "info", "close"}
 # A card's dependsOn items: a linked card's state, as its item should read it.
 DEP_STATES = ("done", "building", "open")
 # A news item is a finished task: done, for the cards that wait on it.
-DEP_OF_STATE = {"working": "building", "waiting": "open", "scheduled": "open", "done": "done", "news": "done"}
+DEP_OF_STATE = {"working": "building", "waiting": "open", "held": "open", "scheduled": "open", "done": "done", "news": "done"}
 # Rule 14: a news row is something to know, never something to answer.
-NEWS_DROPS = ("ask", "recommend", "ifNone") + ANSWER_FIELDS + ("workingSince", "snoozeUntil", "pushedAt", "activeAt",
+NEWS_DROPS = ("ask", "recommend", "ifNone") + ANSWER_FIELDS + ("workingSince", "snoozeUntil", "heldAt", "pushedAt", "activeAt",
                                                               "rank", "rankByHand", "blocks", "kind", "note")
 # Rule 7: blocking or time-sensitive first, then reviews, then decisions, then checks by hand.
 KIND_ORDER = {"review": 0, "decide": 1, "do": 2, "check": 3, "info": 4, "close": 5}
 ACTIVE_HOURS = 3
 # Rule 13: when the keeper last pushed the owner about a waiting card.
 PUSHED = "pushedAt"
+# A review held until the owner asks for it: waiting, but under Later with no push or rank.
+HELD = "heldAt"
 CHAT = re.compile(
     r"see (the|our|my|this) (chat|thread|message)"
     r"|(in|from) the chat (above|earlier|before)"
@@ -203,10 +205,19 @@ def snoozed(r, now):
     return bool(t and t > now)
 
 
+def held(r):
+    return bool(r.get(HELD))
+
+
+def parked(r, now):
+    """Under Later: snoozed till a time, or held until the owner asks."""
+    return snoozed(r, now) or held(r)
+
+
 def needs_push(r, now):
-    """Rule 13: a card waiting on the owner (not snoozed) that no push has announced yet.
+    """Rule 13: a card waiting on the owner (not parked) that no push has announced yet.
     A card back from a snooze needs a fresh one."""
-    if r.get("state") != "waiting" or snoozed(r, now):
+    if r.get("state") != "waiting" or parked(r, now):
         return False
     pushed = parse_time(r.get(PUSHED))
     if pushed is None:
@@ -221,7 +232,7 @@ def by_state(rows, state):
 
 def counts(rows, now):
     waiting = by_state(rows, "waiting")
-    return len([r for r in waiting if not snoozed(r, now)]), len(by_state(rows, "working"))
+    return len([r for r in waiting if not parked(r, now)]), len(by_state(rows, "working"))
 
 
 def news(rows):
@@ -246,8 +257,8 @@ def rank_of(r):
 
 
 def ordered(rows, now):
-    """The waiting deck as the page shows it (rule 6), snoozed cards left out."""
-    shown = [r for r in by_state(rows, "waiting") if not snoozed(r, now)]
+    """The waiting deck as the page shows it (rule 6), snoozed and held cards left out."""
+    shown = [r for r in by_state(rows, "waiting") if not parked(r, now)]
 
     def recent(r):
         t = parse_time(r.get("activeAt"))
@@ -267,8 +278,9 @@ def rank_key(r):
 
 
 def reranked(rows):
-    """New ranks for waiting cards: 1..n by rule 7; a row with rankByHand keeps its rank."""
-    waiting = by_state(rows, "waiting")
+    """New ranks for waiting cards: 1..n by rule 7; a row with rankByHand keeps its rank, a
+    held one is left out."""
+    waiting = [r for r in by_state(rows, "waiting") if not held(r)]
     auto = sorted([r for r in waiting if not r.get("rankByHand")], key=rank_key)
     return {r.id: i + 1 for i, r in enumerate(auto)}
 
@@ -834,11 +846,20 @@ def settled_fold(details, text):
 
 def move(row, to, now, note=None, ask=None, recommend=None, ifnone=None, settled=None,
          session=None, active=False, context=None):
-    """The patch for a move (rules 1, 5, 9, 14). None for done: the row is deleted."""
+    """The patch for a move (rules 1, 5, 9, 14). None for done: the row is deleted. `held` is a
+    waiting card held until the owner asks for it (rule 10)."""
     if to == "done":
         return None
     d = row.data
+    hold, to = to == "held", "waiting" if to == "held" else to
     patch = {"state": to, "updatedAt": iso(now)}
+    if hold:
+        patch[HELD] = iso(now)
+        for k in ("snoozeUntil", "activeAt"):
+            if k in d:
+                patch[k] = DELETE
+    elif HELD in d and to != "news":
+        patch[HELD] = DELETE
     if context is not None:
         patch["context"] = context
     if to == "news":
@@ -865,8 +886,13 @@ def move(row, to, now, note=None, ask=None, recommend=None, ifnone=None, settled
     if to == "waiting":
         # Rule 5: the old answer leaves when the card waits on the owner again.
         for k in ANSWER_FIELDS + ("workingSince", "snoozeUntil", PUSHED):
-            if k in d:
+            if k in d and k not in patch:
                 patch[k] = DELETE
+        if hold and PUSHED in d:
+            del patch[PUSHED]
+        if held(row) and not hold:
+            # Back because the owner asked for it: it's under discussion, and no push is due.
+            patch["activeAt"], patch[PUSHED] = iso(now), iso(now)
         if note is None and "note" in d:
             patch["note"] = DELETE
         for k, v in (("ask", ask), ("recommend", recommend), ("ifNone", ifnone)):
@@ -1228,11 +1254,12 @@ def cmd_order(a):
     print("Waiting:")
     for i, r in enumerate(deck, 1):
         print(f"  {i}. {describe(r)}")
-    later = [r for r in by_state(rows, "waiting") if snoozed(r, now)]
+    later = [r for r in by_state(rows, "waiting") if parked(r, now)]
     if later:
         print("Later:")
         for r in later:
-            print(f"  - {describe(r)} (back {r.get('snoozeUntil')})")
+            back = "review when you ask" if held(r) else f"back {r.get('snoozeUntil')}"
+            print(f"  - {describe(r)} ({back})")
     print("In progress:")
     for r in sorted(by_state(rows, "working"), key=lambda r: str(r.get("workingSince") or r.get("updatedAt") or ""), reverse=True):
         print(f"  - {describe(r)}")
@@ -1272,7 +1299,7 @@ def cmd_move(a):
     if patch is None:
         entries = [delete_entry(r, a.if_version)]
     else:
-        if a.to == "waiting" and r.get("answer") and a.settled is None:
+        if a.to in ("waiting", "held") and r.get("answer") and a.settled is None:
             print(f"note: the old answer leaves: “{r.get('answer')}”. Keep what it settled with --settled.", file=sys.stderr)
         entries = [write_patch(a.rows, r, patch, a.if_version, a.out)]
         if "if_version" not in entries[0]:
@@ -1444,7 +1471,8 @@ def main(argv=None):
 
     s = cmd("move", cmd_move, "move a card; writes a patch")
     s.add_argument("id")
-    s.add_argument("to", choices=["news", "working", "waiting", "done"])
+    s.add_argument("to", choices=["news", "working", "waiting", "held", "done"],
+                   help="held: waiting, but held under Later until the owner asks for it")
     s.add_argument("--context", help="set the one-line context (a news item's summary)")
     s.add_argument("--note")
     s.add_argument("--ask")
