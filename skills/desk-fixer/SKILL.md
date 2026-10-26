@@ -18,7 +18,8 @@ You were started for one issue on `bagrat/claude-plugin-desk`. The routine's pay
 4. **Questions go through the Desk orchestrator**: one message with the question, your
    recommendation and what you'll do if there's no preference; wait for its answer. Never push
    the owner yourself unless the orchestrator can't be reached.
-5. **Ship it:** a `claude/<topic>` branch, a PR that says `Fixes #<n>`, CI green, then merge
+5. **Ship it:** a `claude/<topic>` branch, a PR that says `Fixes #<n>` and bumps `version` in
+   `.claude-plugin/plugin.json`, CI green, then merge
    when you're sure the fix is right and small; otherwise leave it for review and say why.
 6. **Report** to the Desk orchestrator: merged (with the PR link) or what's left. It posts the
-   news and tells every keeper to pull.
+   news and tells every keeper to run `/desk:update`.

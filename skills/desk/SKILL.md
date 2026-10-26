@@ -45,7 +45,8 @@ directory; `--desk FILE` (before the command) or `$DESK_CONFIG` names another.
 | --- | --- |
 | `python3 $S sessions $R` | The sessions behind open cards, one per line, to check one by one (`get_session`). |
 | `python3 $S prep $R --sessions sessions.json` | **Before every message.** The rule-reload check, the checks, the notes to sort, the deck in the page's order, the footer. Exit 1 when anything is left to do. |
-| `python3 $S loaded` | Mark the rules reloaded, after you've pulled and re-read what `prep` named. |
+| `python3 $S loaded` | Mark the rules reloaded, after you've re-read what `prep` or `update` named. |
+| `python3 $S update` | `/desk:update`: pull the plugin's clone at `~/.claude/desk` (clone it if missing) and name what changed since you loaded it. Exit 1 when there's something to re-read. |
 | `python3 $S check $R [--sessions …] [--stale-hours 12]` | The checks alone. |
 | `python3 $S footer $R` | The footer line, exactly. |
 | `python3 $S order $R` | News, then the waiting deck as the page shows it, then Later and In progress. |
@@ -79,15 +80,19 @@ What the script does by itself:
 - `images` replaces the whole `details` array for a fold. Delete each id in `delete_assets`
   from the page's asset store (Artifact `delete`, `url`, `path: <id>`).
 
-**The rule-reload check.** `prep` first runs `git fetch origin main` on the project's clone
-(where `desk.json` sits), on this plugin's own clone, and on each `watch` clone. When
-origin/main changed `CLAUDE.md`, `memory/MEMORY.md`, `.claude/skills/`, `.claude/desk.json`,
-`skills/` or `page/desk.html` since you last loaded them, it stops: exit 1, no deck, no
-footer. Then `git -C <clone> pull origin main`, re-read each file (load a changed skill
-again), and run `loaded`. When the page template changed, republish the Desk in place too:
-`page --out <file>`, then Artifact publish with the Desk's `url` (the cards, notes and look
-live in its database and stay). A failed fetch only warns. A plugin copy that isn't a git
-clone (a plugin install on a computer) isn't checked: there, `claude plugin update`.
+**The rule-reload check.** `prep` first compares the HEAD of the project's clone (where
+`desk.json` sits), of the plugin's clone and of each `watch` clone with what you last loaded;
+it never fetches, so it costs no time. The plugin's clone is the one `desk.py` runs from, or
+`~/.claude/desk` when it runs from a copy that isn't a clone (a plugin install). When a
+pull changed `CLAUDE.md`, `memory/MEMORY.md`, `.claude/skills/`, `.claude/desk.json`,
+`skills/` or `page/desk.html` since then, it stops: exit 1, no deck, no footer. Re-read each
+file (load a changed skill again) and run `loaded`. When the page template changed, republish
+the Desk in place too: `page --out <file>`, then Artifact publish with the Desk's `url` (the
+cards, notes and look live in its database and stay).
+
+**Updating.** New Desk rules arrive by `/desk:update` (the `update` skill): it pulls
+`~/.claude/desk` and does the above in one go. The keeper runs it when the Desk orchestrator
+says a fix merged; the owner can run it any time.
 
 What `check` flags is in the script's messages; each line is `<id>: <problem>` and names the
 rule. A failing check is work before the message, not a note in it. When a flag is wrong (a
