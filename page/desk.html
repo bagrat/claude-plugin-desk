@@ -614,6 +614,7 @@ function drawInbox(docs) {
 // or a republished page loses nothing.
 function keepNoteDraft() { store.set("noteDraft", { text: $("note-text").value, id: noteId, images: picked.filter((p) => p.id).map(({ id, name }) => ({ id, name })) }); }
 function drawPicked() {
+  syncNoteSend();
   $("note-picked").replaceChildren(...picked.map((p) => {
     const s = el("span", "pick" + (p.err ? " bad" : ""), p.name + (p.err ? ": couldn't upload (" + p.err + ")" : p.id ? "" : " · uploading…"));
     const x = btn(null, "×"); x.setAttribute("aria-label", "Remove " + p.name);
@@ -621,7 +622,17 @@ function drawPicked() {
     s.append(x); return s;
   }));
 }
-// Screenshots upload as soon as they're picked, so Send rarely waits on them.
+// While a screenshot is still uploading, Send is off and reads "Uploading…" (its shortcut does
+// nothing meanwhile), so a tap is never kept waiting on an upload: the wake then follows the tap
+// with only the row write between them. A failed upload leaves Send on, to try it again.
+let noteSending = false;
+function syncNoteSend() {
+  const send = $("note-send"), up = picked.some((p) => !p.id && !p.err);
+  send.disabled = noteSending || up;
+  send.firstChild.nodeValue = up ? "Uploading…" : "Send to the keeper";
+  const k = send.querySelector(".kbd"); if (k) k.hidden = up;
+}
+// Screenshots upload as soon as they're picked.
 function upload(p) {
   p.err = null;
   p.up = assets.upload(p.file).then((a) => { p.id = a.id; }, (e) => { p.err = String(e?.code || "error"); }).finally(() => { drawPicked(); keepNoteDraft(); });
@@ -646,14 +657,19 @@ function setupNoteBox() {
   send.onclick = async () => {
     const raw = ta.value, text = raw.trim();
     if (!text && !picked.length) { ta.focus(); return; }
-    send.disabled = true;
+    if (send.disabled) return;
+    // A screenshot that couldn't upload is tried again; the note waits for the next tap.
+    if (picked.some((p) => !p.id)) {
+      for (const p of picked) if (p.err && p.file) upload(p);
+      drawPicked();
+      st(picked.some((p) => !p.id && !p.err) ? "Trying the screenshot again; tap Send once it's up." : "A screenshot couldn't upload. Remove it (×) to send without it.");
+      return;
+    }
+    noteSending = true; syncNoteSend();
     // Read in the tap: where the comment anchors.
     const anchor = cm ? cm.anchorFor($("p-note")) : null;
     try {
       const batch = picked.slice();
-      for (const p of batch) if (p.err && p.file) upload(p);
-      if (batch.some((p) => !p.id)) { st("Uploading the screenshots…"); await Promise.all(batch.map((p) => p.up)); }
-      if (batch.some((p) => !p.id)) { st("A screenshot couldn't upload. Remove it (×), or tap Send to try again."); return; }
       st("Saving…");
       noteId ||= "n-" + new Date().toISOString().replace(/\D/g, "").slice(0, 14) + "-" + Math.random().toString(16).slice(2, 6);
       const id = noteId, images = batch.map((p) => ({ id: p.id, caption: p.name }));
@@ -669,7 +685,7 @@ function setupNoteBox() {
       const { how, code, detail } = await within(tell("[Desk note] " + clip(text || "(images only)", 300) + " (inbox " + id + ")", anchor), 15e3).catch(() => ({ how: "pending", code: "timeout" }));
       if (how === "kept" || how === "approval") db.collection("inbox").doc(id).update({ sendErr: code, sendErrDetail: detail || "" }).catch(() => {});
       st(NOTE_SENT[how](code)); toast(how === "sent" ? "Note sent to the keeper" : "Note saved");
-    } finally { send.disabled = false; }
+    } finally { noteSending = false; syncNoteSend(); }
   };
 }
 
