@@ -719,7 +719,25 @@ function newsCard(id, t, where) {
   c.append(h, bd);
   return c;
 }
-function fill(list, nodes, emptyText) { list.replaceChildren(...(nodes.length ? nodes : [el("div", "empty", emptyText)])); }
+// Typing is never interrupted by a refresh (#40): while a card's text box has focus, a re-render
+// leaves that card where it is (focus, caret, folds, a phone's keyboard) and redraws the rest
+// around it; once focus leaves (after a tap finishes, so Send still lands) it catches up.
+const held = () => { const a = document.activeElement; return a?.tagName === "TEXTAREA" ? a.closest(".card, details.task") : null; };
+let pressed = false;
+const catchUp = () => setTimeout(() => { if (ui.stale && !pressed && !held() && ui.docs) render(ui.docs); });
+document.addEventListener("focusout", catchUp);
+document.addEventListener("pointerdown", () => { pressed = true; }, true);
+for (const e of ["pointerup", "pointercancel"]) document.addEventListener(e, () => { pressed = false; catchUp(); }, true);
+function fill(list, nodes, emptyText) {
+  const keep = held(), old = keep && keep.parentNode === list ? [...list.children].indexOf(keep) : -1;
+  if (old < 0) { list.replaceChildren(...(nodes.length ? nodes : [el("div", "empty", emptyText)])); return; }
+  ui.stale = true;
+  let k = nodes.findIndex((n) => n.id === keep.id);
+  if (k < 0) { k = Math.min(old, nodes.length); nodes.splice(k, 0, keep); } else nodes[k] = keep;
+  // The kept card never leaves the page: removing it, even to put it back, would drop focus.
+  for (const n of [...list.childNodes]) if (n !== keep) n.remove();
+  keep.before(...nodes.slice(0, k)); keep.after(...nodes.slice(k + 1));
+}
 
 // View state survives re-renders: the tab, one-at-a-time or all, which item is showing.
 // It opens on News when there is any, otherwise on Waiting (a #news, #waiting… link opens that
@@ -872,6 +890,7 @@ function go(step) {
 }
 
 function render(docs) {
+  ui.stale = false; // set again by whatever a text box in use holds back
   const all = docs.map((s) => [s.id, s.data() || {}]);
   const by = (st) => all.filter(([, t]) => t.state === st);
   const now = new Date().toISOString();
@@ -914,7 +933,8 @@ function render(docs) {
   else if (ui.tab === "news") for (const id of ui.news) markSeen(id, ui.rows[id]);
   else if (document.hidden && sig !== ui.sig) ui.backToTop = true;
   ui.sig = sig;
-  drawWaiting();
+  const h = held();
+  if (h && $("l-waiting").contains(h)) ui.stale = true; else drawWaiting();
   const workRows = (where) => working.map(([id, t], i) => listCard(id, t, i + 1, where)), schedRows = () => scheduled.map(([id, t]) => row(id, t, when(t.when))), doneRows = () => done.map(([id, t]) => row(id, t, t.doneAt ? day(t.doneAt) : ""));
   fill($("l-working"), workRows("w"), "Nothing in progress.");
   fill($("l-scheduled"), schedRows(), "Nothing scheduled.");
