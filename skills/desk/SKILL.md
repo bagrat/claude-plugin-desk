@@ -239,6 +239,13 @@ recommend, ifNone, blocks, links `[{label, url}]`, sessions `[{label, url}]`, si
 activeAt, snoozeUntil, heldAt, pushedAt, answer, answeredAt, quick, quickAt, answerSent, workingSince,
 note, dependsOn `[{item, card?, state}]` (done | building | open); scheduled rows also `when`.
 
+Card text (context, note, ask, recommend, ifNone, folds' text) is a small Markdown: `**bold**`,
+`` `code` ``, `[label](https://…)` and bare https links; and, where a field holds paragraphs
+(context, note, folds), `- ` and `1. ` lists, fenced ``` code blocks (the word after the opening
+fence shows as a label) and `> ` quotes (with their own markup and code inside). Code blocks and
+quotes get a Copy button; a quote copies without its `> `, so put a ready-to-paste comment in one.
+No HTML: it shows as text.
+
 **inbox**: text, from (`page`, a session link, `chat`), at, images? `[{id, caption}]`.
 
 **settings/look**: theme, icon.
