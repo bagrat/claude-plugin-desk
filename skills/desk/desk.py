@@ -1199,6 +1199,8 @@ def cmd_inbox(a):
         bits = [n.get("at") or "?", n.get("from") or "?"]
         if n.get("images"):
             bits.append(f"{len(n.get('images'))} image(s)")
+        if n.get("sendErr"):
+            bits.append(f"the page couldn't wake you: {n.get('sendErr')}")
         print(f"{n.id} [{', '.join(bits)}]\n  {n.get('text', '')}")
     if not notes:
         print("inbox: empty")
@@ -1531,6 +1533,10 @@ def cmd_prep(a):
     late = stale_read(a.rows, a.max_age)
     if late:
         print(late)
+        return 1
+    if not inbox_dir(a.rows):
+        print("Stop: no inbox in this dump: read the notes too (ArtifactData list, collection inbox, the same "
+              "out_dir; paste the result, even an empty one, into inbox/_versions.txt) and run this again (rule 15).")
         return 1
     if not CONFIG.get("timezone"):
         print("warning: desk.json has no timezone: ask the owner theirs (an IANA name) and add it; times read as UTC till then",

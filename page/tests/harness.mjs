@@ -13,6 +13,7 @@ export const ok = (cond, what) => { console.log((cond ? 'ok   ' : 'FAIL ') + wha
 export const done = async (b) => { await b.close(); console.log(fails ? `${fails} failed` : 'all passed'); process.exit(fails ? 1 : 0); };
 
 // db: {collection: {id: row}}; the page's writes land in window.__log and in the store.
+// window.__hook.set / .upload / .send (async, may throw {code}) run before a write, upload or send.
 export async function open(b, { db = {}, scheme = 'dark', hash = '', canDelete = true, width = 402, page = {}, owner = true, assets = true, zone } = {}) {
   const ctx = await b.newContext({ ...(zone ? { timezoneId: zone } : {}), viewport: { width, height: 874 }, deviceScaleFactor: 2, colorScheme: scheme, hasTouch: true, isMobile: width < 500 });
   const p = await ctx.newPage();
@@ -27,12 +28,12 @@ export async function open(b, { db = {}, scheme = 'dark', hash = '', canDelete =
     const doc = (c, id) => ({
       update: async (p) => { window.__log.push(['update', c, id, p]); if (window.__failSave) throw Object.assign(new Error('no'), { code: 'unavailable' }); Object.assign(col(c)[id], p); fire(c); },
       delete: async () => { window.__log.push(['delete', c, id]); if (!canDelete) throw Object.assign(new Error('no'), { code: 'not_granted' }); delete col(c)[id]; fire(c); },
-      set: async (d) => { window.__log.push(['set', c, id, d]); col(c)[id] = d; fire(c); },
+      set: async (d) => { await window.__hook?.set?.(c, id, d); window.__log.push(['set', c, id, d]); col(c)[id] = d; fire(c); },
       onSnapshot: (f) => { ((dsubs[c + '\n' + id]) ||= []).push(f); setTimeout(() => f(dsnap(c, id)), 10); return () => {}; },
     });
     const dbo = { collection: (c) => ({ onSnapshot: (f) => { (subs[c] ||= []).push(f); setTimeout(() => f(snap(c)), 10); return () => {}; }, doc: (id) => doc(c, id) }) };
-    const cm = { anchorFor: async () => ({}), canSendToClaude: async () => 'available', sendToClaude: async (x) => { window.__log.push(['comment', x.text]); } };
-    const as = { upload: async (blob) => { window.__log.push(['upload', blob.name]); return { id: 'f'.repeat(32), url: '/_blob/' + 'f'.repeat(32) }; } };
+    const cm = { anchorFor: async () => ({}), canSendToClaude: async () => 'available', sendToClaude: async (x) => { await window.__hook?.send?.(x); window.__log.push(['comment', x.text]); } };
+    const as = { upload: async (blob) => { await window.__hook?.upload?.(blob); window.__log.push(['upload', blob.name]); return { id: 'f'.repeat(32), url: '/_blob/' + 'f'.repeat(32) }; } };
     window.claude = { use: async (n) => n === 'db' ? dbo : n === 'user' ? { isOwner: () => owner } : n === 'comments' ? cm : n === 'assets' && assets ? as : null };
   }, { db, canDelete, owner, assets });
   const html = render(page);

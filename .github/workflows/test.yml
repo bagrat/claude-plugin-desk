@@ -23,4 +23,4 @@ jobs:
       - name: The page
         run: |
           export NODE_PATH=$(npm root -g)
-          for t in page/tests/news.mjs page/tests/deps.mjs page/tests/desk.mjs page/tests/step.mjs page/tests/zone.mjs page/tests/markup.mjs page/tests/typing.mjs page/tests/compose.mjs page/tests/sent.mjs; do node $t "$RUNNER_TEMP" || exit 1; done
+          for t in page/tests/news.mjs page/tests/deps.mjs page/tests/desk.mjs page/tests/step.mjs page/tests/zone.mjs page/tests/markup.mjs page/tests/typing.mjs page/tests/compose.mjs page/tests/sent.mjs page/tests/note.mjs; do node $t "$RUNNER_TEMP" || exit 1; done

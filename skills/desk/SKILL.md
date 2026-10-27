@@ -33,8 +33,8 @@ the Artifact tools, so you do the I/O:
 1. **Read** the rows and the notes fresh into one new directory: ArtifactData `list`,
    `collection: "tasks"`, then `collection: "inbox"`, both with the same
    `out_dir: <scratch>/rows-<time>`. Paste each result as is into
-   `<that directory>/tasks/_versions.txt` and `inbox/_versions.txt`, and every entry the
-   script prints is pinned.
+   `<that directory>/tasks/_versions.txt` and `inbox/_versions.txt` (an empty inbox too: `prep`
+   stops on a dump with no `inbox/`), and every entry the script prints is pinned.
 2. **Run** the script on that directory (`$R`, or `$R/tasks`).
 3. **Write** what it prints: each entry is `{op, collection, doc_id, file_path, if_version}`;
    send one with ArtifactData `update` / `set` / `delete`, several with `batch`
@@ -232,7 +232,11 @@ it.
 
 The page's buttons and its note tab save to the database and post a "sent to Claude" comment,
 which wakes whichever session **watches** the page (ArtifactComments `watch`): the keeper holds
-that watch. On a wake: read the thread, act, reply in one line, resolve it, update the row.
+that watch. On a wake: read the thread, act, reply in one line, resolve it, update the row. A
+`[Desk note] … (inbox <id>)` wake comes only once the note is saved: sort that note (rule 15),
+from its row (the comment's text may be cut short, and carries no images), and reply where it went.
+When the page can't wake you (no watch, no consent, a limit), it says so to the owner and sets
+`sendErr` on the row; the note then waits for your next turn, and `inbox` shows why.
 
 ## Row fields
 
