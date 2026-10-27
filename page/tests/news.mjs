@@ -25,6 +25,7 @@ for (const scheme of ['dark', 'light']) {
   ok(await s.p.textContent('#n-news') === '2', `${scheme}: count 2`);
   ok(JSON.stringify(await s.p.$$eval('#l-news .ncard .t-title', (l) => l.map((x) => x.textContent))) === JSON.stringify(['Version 1.2 is out', 'Merged: the search box']), `${scheme}: newest first`);
   ok(await s.p.$$eval('#p-news .dock, #p-news .quick', (l) => l.length) === 0, `${scheme}: no answer buttons on news`);
+  ok(await s.p.$$eval('#l-news .ncard', (l) => l.every((c) => { const n = c.querySelector('details.note'); return n && !n.open && n.querySelector('summary').textContent === 'Add a note'; })), `${scheme}: each news card has a folded Add a note`);
   await s.p.screenshot({ path: `${out}/news-${scheme}.png` });
   if (scheme === 'dark') {
     await s.p.tap('#n-release-12 .btn.seen'); await s.p.waitForTimeout(300);
@@ -57,4 +58,39 @@ for (const [hash, tab, what] of [['#waiting', 'waiting', '#waiting with news ope
   const log = await s.log();
   ok(log[0][0] === 'delete' && log[1][0] === 'update' && log[1][3].state === 'done' && log.length === 2, 'no delete: Seen sets done');
   ok(await s.p.textContent('#n-news') === '1', 'and it leaves the tab'); await s.ctx.close(); }
+// A note from a news card (#46): sent as an answer is, so the keeper wakes, and the card moves
+// to In progress with the note on it. Ctrl-Enter sends too; a draft survives a re-render, and
+// typing survives a change to the list (#40).
+{ const s = await open({ rows: { ...news, ...rest } });
+  await s.p.click('#n-release-12 details.note > summary');
+  const ta = '#n-release-12 .answer textarea';
+  ok(await s.p.$eval(ta, (n) => n.placeholder) === 'Type or dictate your note…', 'the note box asks for a note');
+  ok(/Send to the keeper/.test(await s.p.textContent('#n-release-12 .answer button')), 'with Send to the keeper');
+  await s.p.click(ta); await s.p.keyboard.type('Tell me more');
+  await s.p.evaluate((ta) => { document.querySelector(ta).__mine = 1; }, ta);
+  await s.p.evaluate(() => window.__put('tasks', 'search-box', { state: 'news', title: 'Merged: the search box, again', since: '2026-10-25T10:00:00Z', updatedAt: '2026-10-26T11:30:00Z' }));
+  await s.p.waitForTimeout(200);
+  ok(await s.p.evaluate((ta) => document.activeElement === document.querySelector(ta) && document.activeElement.__mine === 1, ta), 'typing a note: a change to the list keeps focus');
+  await s.p.keyboard.type(' about the release');
+  await s.p.keyboard.press('Control+Enter'); await s.p.waitForTimeout(300);
+  const log = await s.log(), up = log.find((l) => l[0] === 'update' && l[2] === 'release-12' && l[3].answer);
+  ok(up && up[3].answer === 'Tell me more about the release' && up[3].state === 'working' && up[3].quick === 'text' && up[3].workingSince && up[3].answeredAt && up[3].quickAt && up[3].answerSent === false, 'the note is saved as an answer, state working');
+  ok(log.some((l) => l[0] === 'comment' && l[1] === '[Desk] Version 1.2 is out (task release-12): Tell me more about the release'), 'and sent to the keeper as a comment');
+  ok(log.some((l) => l[0] === 'update' && l[2] === 'release-12' && l[3].answerSent === true), 'marked sent');
+  await s.p.evaluate(() => document.activeElement?.blur?.()); await s.p.waitForTimeout(200);
+  ok(await s.p.textContent('#n-news') === '1', 'it leaves News');
+  await s.p.click('#tab-working'); await s.p.click('#w-release-12 > summary');
+  ok(/Your answer, .*Tell me more about the release/.test(await s.p.textContent('#w-release-12 .answered')), 'In progress shows the note');
+  ok(s.errs.length === 0, 'no errors ' + s.errs.join(' ')); await s.ctx.close(); }
+{ const s = await open({ rows: { ...news, ...rest } });
+  await s.p.click('#n-search-box details.note > summary');
+  await s.p.fill('#n-search-box .answer textarea', 'Looks wrong on mobile');
+  await s.p.evaluate(() => { document.activeElement?.blur?.(); render(ui.docs); });
+  ok(await s.p.inputValue('#n-search-box .answer textarea') === 'Looks wrong on mobile', 'a note draft survives a re-render');
+  await s.p.click('#n-search-box .answer button'); await s.p.waitForTimeout(300);
+  ok((await s.log()).some((l) => l[0] === 'update' && l[2] === 'search-box' && l[3].answer === 'Looks wrong on mobile'), 'Send to the keeper sends it');
+  ok(s.errs.length === 0, 'no errors ' + s.errs.join(' ')); await s.ctx.close(); }
+{ const s = await open({ rows: { 'kept-news': { state: 'news', title: 'Kept as news', answer: 'Noted', answeredAt: '2026-10-26T10:00:00Z', since: '2026-10-26T09:00:00Z' }, ...rest } });
+  ok(/Your answer, .*Noted/.test(await s.p.textContent('#n-kept-news .answered')), 'a news card with an answer shows it');
+  await s.ctx.close(); }
 await done(b);

@@ -191,7 +191,10 @@ it.
     ask for it. Then it comes back to Waiting (`move … waiting`), and the keeper sends the
     card's images into the chat as files (SendUserFile), one per image with its caption, so
     they can review on the phone, not only a link to the page. On news, one button, **Seen**, which deletes the row
-    (where it can't, it sets `done` and you delete it); it wakes no one.
+    (where it can't, it sets `done` and you delete it); it wakes no one. Under it, folded, **Add a
+    note** (2026-10-27): a note sent from a news card is an answer like any other, so it wakes
+    you and moves the row to `working`, out of News and into In progress. It has no session yet, so
+    `check` flags it until you give it one or move it on (waiting, held, news, or delete it).
 11. **One writer.** Only the keeper writes cards; other sessions report to it. The one write
     anyone else makes is a note into the Inbox (rule 15); an image comes as an asset id (rule 4).
 12. **Before every message.** Rows and notes read fresh, only the sessions behind cards checked,
@@ -205,7 +208,8 @@ it.
     asked for merged, a decision live, a session finished with nothing left, a failure fixed, a
     scheduled job's result worth seeing. Never routine progress. Added in the same turn the
     chat would have said it. A title, a one-line `context`, maybe links, folds and images; never
-    an ask; never pushes. It stays until Seen.
+    an ask; never pushes. It stays until Seen, or until the owner sends a note from it, which
+    makes it an In progress card with their answer (rule 10).
 15. **The Inbox.** The owner drops notes from the page's note tab (the pencil, last in the bar,
     owner only; 2026-10-26), from `/desk:note` in any session on the account, or in the keeper's
     chat. Notes wait in the `inbox` collection and show above the cards as a strip ("2 notes
