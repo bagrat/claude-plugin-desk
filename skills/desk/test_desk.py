@@ -55,6 +55,7 @@ class Base(unittest.TestCase):
         tasks.load_config()
         self.dir = self.root / "dump" / "tasks"
         self.dir.mkdir(parents=True)
+        (self.root / "dump" / "inbox").mkdir()
 
     def tearDown(self):
         if self._env is None:
@@ -701,7 +702,6 @@ class News(Base):
     def test_a_stale_note_stops_prep_too(self):
         self.put("a", waiting())
         d = self.root / "dump" / "inbox"
-        d.mkdir()
         (d / "n-1.json").write_text(json.dumps({"text": "x", "from": "page", "at": NOW}))
         old = time.time() - 3 * 60
         os.utime(d / "n-1.json", (old, old))
@@ -1152,6 +1152,19 @@ class DeskTests(Base):
             self.assertIn("no Desk configured", str(e.exception.code))
         finally:
             os.chdir(cwd)
+
+    def test_prep_stops_when_the_notes_were_not_read(self):
+        self.put("a", waiting())
+        (self.root / "dump" / "inbox").rmdir()
+        code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-rules")
+        self.assertEqual(code, 1)
+        self.assertIn("no inbox in this dump", out)
+        self.assertNotIn("[●", out)
+
+    def test_inbox_says_when_the_page_could_not_wake_the_keeper(self):
+        (self.note_dir() / "n-1.json").write_text(json.dumps({"text": "x", "from": "page", "at": NOW, "sendErr": "send_no_session"}))
+        code, out, _ = self.run_cli("inbox", self.root / "dump")
+        self.assertIn("the page couldn't wake you: send_no_session", out)
 
     def test_note_writes_a_row_and_its_entry(self):
         code, out, _ = self.run_cli("note", "--text", " The swipe skips a card ", "--from", "chat",

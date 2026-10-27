@@ -26,7 +26,7 @@ owner may have cleared news since):
 
 1. Read the rows and notes fresh (ArtifactData `list`, `collection` `tasks`, then `inbox`,
    the same new `out_dir: <scratch>/rows-<HHMM>`); paste each result into that collection's
-   `_versions.txt`.
+   `_versions.txt`, an empty inbox's too (`prep` stops without `inbox/`).
 2. `python3 $S sessions <dir>`: check each session it lists with `get_session`, one by one,
    and write what you saw to `<scratch>/sessions.json`.
 3. **Sort the Inbox** (rule 15): for each note `inbox` lists, fold it into its task's card,

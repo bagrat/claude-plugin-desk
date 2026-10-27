@@ -52,7 +52,10 @@ header.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; b
 .note-box.answer textarea { min-height: 140px; background: var(--card); }
 .note-box .row2 { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .note-box input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
-.note-box .picked { font-size: 13px; color: var(--quiet); }
+.note-box .picked { display: flex; flex-wrap: wrap; gap: 6px; font-size: 13px; color: var(--quiet); }
+.note-box .pick { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px 10px; border-radius: 999px; background: var(--chip-bg); }
+.note-box .pick.bad { color: var(--new); }
+.note-box .pick button { min-width: 28px; min-height: 28px; border: 0; background: none; color: inherit; font: 700 15px var(--f-ui); cursor: pointer; }
 .stamp { margin: 24px 0 0; font-size: 12px; color: var(--quiet); }
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--edge); background: var(--card); color: var(--fg); font: 600 15px var(--f-ui); text-decoration: none; cursor: pointer; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
@@ -592,7 +595,10 @@ function applyLook(look) { const l = Object.assign({}, DESK_LOOK, look || {}); a
 // collection until the keeper turns each into a card and deletes it. The strip, above the
 // cards, shows them; the box to drop one is the last tab, the owner's only.
 let assets = null;
-const picked = [];
+const picked = []; // screenshots for the next note: {file, name, up, id, err}
+let noteId = null; // the note being sent: a retry rewrites this row instead of adding a second one
+const within = (p, ms) => Promise.race([p, new Promise((_, no) => setTimeout(() => no({ code: "timeout" }), ms))]);
+const clip = (s, n) => s.length > n ? s.slice(0, n - 1) + "…" : s;
 function drawInbox(docs) {
   const notes = docs.map((s) => [s.id, s.data() || {}]).sort((a, b) => String(a[1].at).localeCompare(String(b[1].at)));
   $("inbox").hidden = $("strip").hidden = !notes.length;
@@ -600,29 +606,70 @@ function drawInbox(docs) {
   $("strip-l").replaceChildren(...notes.map(([, n]) => {
     const li = el("li"); li.append(el("div", null, n.text || ""));
     const from = n.from === "page" ? "from this page" : n.from ? "from " + n.from : "";
-    li.append(el("span", null, [sinceShort(n.at), from, n.images?.length ? n.images.length + " image" + (n.images.length > 1 ? "s" : "") : ""].filter(Boolean).join(" · ")));
+    li.append(el("span", null, [sinceShort(n.at), from, n.images?.length ? n.images.length + " image" + (n.images.length > 1 ? "s" : "") : "", n.sendErr ? "the keeper wasn't woken" : ""].filter(Boolean).join(" · ")));
     return li;
   }));
 }
+// The unsent note lives in this browser too (text, row id, uploaded screenshots), so a reload
+// or a republished page loses nothing.
+function keepNoteDraft() { store.set("noteDraft", { text: $("note-text").value, id: noteId, images: picked.filter((p) => p.id).map(({ id, name }) => ({ id, name })) }); }
+function drawPicked() {
+  $("note-picked").replaceChildren(...picked.map((p) => {
+    const s = el("span", "pick" + (p.err ? " bad" : ""), p.name + (p.err ? ": couldn't upload (" + p.err + ")" : p.id ? "" : " · uploading…"));
+    const x = btn(null, "×"); x.setAttribute("aria-label", "Remove " + p.name);
+    x.onclick = () => { picked.splice(picked.indexOf(p), 1); drawPicked(); keepNoteDraft(); };
+    s.append(x); return s;
+  }));
+}
+// Screenshots upload as soon as they're picked, so Send rarely waits on them.
+function upload(p) {
+  p.err = null;
+  p.up = assets.upload(p.file).then((a) => { p.id = a.id; }, (e) => { p.err = String(e?.code || "error"); }).finally(() => { drawPicked(); keepNoteDraft(); });
+}
+const NOTE_SENT = {
+  sent: () => "Sent. The keeper has it.",
+  approval: () => "Saved on the Inbox. To wake the keeper from this page, allow comments for it once; this note waits for the keeper's next turn.",
+  pending: () => "Saved on the Inbox. Waking the keeper hasn't gone through yet; if it doesn't, the note waits for the keeper's next turn.",
+  kept: (code) => code === "send_no_session"
+    ? "Saved on the Inbox, but no keeper is watching this page: it waits for the keeper's next turn. Tell it in the chat if it can't wait."
+    : "Saved on the Inbox, but the keeper couldn't be woken (" + code + "): it waits for the keeper's next turn.",
+};
 function setupNoteBox() {
   $("tab-note").hidden = false;
   if (!assets) $("note-pick-l").hidden = true;
-  $("note-pick").onchange = (e) => { picked.push(...e.target.files); $("note-picked").textContent = picked.length ? picked.length + " image" + (picked.length > 1 ? "s" : "") + " added" : ""; e.target.value = ""; };
-  composer($("note-text"), $("note-send"));
-  $("note-send").onclick = async () => {
-    const ta = $("note-text"), text = ta.value.trim(), send = $("note-send");
+  const ta = $("note-text"), send = $("note-send"), st = (m) => { $("note-st").textContent = m; };
+  const d = store.get("noteDraft", null);
+  if (d) { ta.value = d.text || ""; noteId = d.id || null; for (const im of d.images || []) picked.push({ id: im.id, name: im.name || "screenshot" }); drawPicked(); }
+  ta.addEventListener("input", keepNoteDraft);
+  $("note-pick").onchange = (e) => { for (const file of e.target.files) { const p = { file, name: file.name || "screenshot" }; picked.push(p); upload(p); } drawPicked(); e.target.value = ""; };
+  composer(ta, send);
+  send.onclick = async () => {
+    const raw = ta.value, text = raw.trim();
     if (!text && !picked.length) { ta.focus(); return; }
-    send.disabled = true; $("note-st").textContent = "Saving…";
-    const at = new Date().toISOString(), id = "n-" + at.replace(/\D/g, "").slice(0, 14) + "-" + Math.random().toString(16).slice(2, 6);
-    const sending = tell("[Desk note] " + (text || "(images only)") + " (inbox " + id + ")", cm ? cm.anchorFor($("p-note")) : null);
+    send.disabled = true;
+    // Read in the tap: where the comment anchors.
+    const anchor = cm ? cm.anchorFor($("p-note")) : null;
     try {
-      const images = [];
-      for (const f of picked) { const a = await assets.upload(f); images.push({ id: a.id, caption: f.name || "" }); }
-      await db.collection("inbox").doc(id).set(Object.assign({ text: text || "(see the images)", from: "page", at }, images.length ? { images } : {}));
-    } catch { send.disabled = false; $("note-st").textContent = "Couldn't save it. Tell the keeper in the chat instead."; return; }
-    ta.value = ""; grow(ta); picked.length = 0; $("note-picked").textContent = ""; send.disabled = false;
-    const { how } = await sending;
-    $("note-st").textContent = SENT[how]; toast(how === "sent" ? "Note sent to the keeper" : "Note saved");
+      const batch = picked.slice();
+      for (const p of batch) if (p.err && p.file) upload(p);
+      if (batch.some((p) => !p.id)) { st("Uploading the screenshots…"); await Promise.all(batch.map((p) => p.up)); }
+      if (batch.some((p) => !p.id)) { st("A screenshot couldn't upload. Remove it (×), or tap Send to try again."); return; }
+      st("Saving…");
+      noteId ||= "n-" + new Date().toISOString().replace(/\D/g, "").slice(0, 14) + "-" + Math.random().toString(16).slice(2, 6);
+      const id = noteId, images = batch.map((p) => ({ id: p.id, caption: p.name }));
+      keepNoteDraft();
+      try { await within(db.collection("inbox").doc(id).set(Object.assign({ text: text || "(see the images)", from: "page", at: new Date().toISOString() }, images.length ? { images } : {})), 20e3); }
+      catch (e) { st(e?.code === "timeout" ? "Not confirmed yet. Your note is still here: tap Send again (it won't land twice)." : "Couldn't save it (" + (e?.code || "error") + "). Your note is still here: try again, or tell the keeper in the chat."); return; }
+      // Saved: what was sent leaves the box; anything typed or picked meanwhile stays.
+      ta.value = ta.value.startsWith(raw) ? ta.value.slice(raw.length).trimStart() : ta.value; grow(ta);
+      for (const p of batch) picked.splice(picked.indexOf(p), 1);
+      noteId = null; drawPicked(); keepNoteDraft();
+      // The keeper is woken only now, so its wake always finds the note.
+      st("Saved on the Inbox. Waking the keeper…");
+      const { how, code, detail } = await within(tell("[Desk note] " + clip(text || "(images only)", 300) + " (inbox " + id + ")", anchor), 15e3).catch(() => ({ how: "pending", code: "timeout" }));
+      if (how === "kept" || how === "approval") db.collection("inbox").doc(id).update({ sendErr: code, sendErrDetail: detail || "" }).catch(() => {});
+      st(NOTE_SENT[how](code)); toast(how === "sent" ? "Note sent to the keeper" : "Note saved");
+    } finally { send.disabled = false; }
   };
 }
 
@@ -1036,7 +1083,10 @@ function render(docs) {
   cm = await window.claude?.use?.("comments") ?? null;
   if (!db) { $("count").textContent = "Open in claude.ai, signed in, to see the list"; return; }
   db.collection("settings").doc("look").onSnapshot((s) => applyLook(s.exists ? s.data() : null), () => {});
-  db.collection("inbox").onSnapshot((snap) => drawInbox(snap.docs), () => {});
+  db.collection("inbox").onSnapshot((snap) => drawInbox(snap.docs), () => {
+    $("inbox").hidden = $("strip").hidden = false; $("strip-l").replaceChildren();
+    $("strip-n").textContent = "Your notes stopped updating here. Reload the page to see them.";
+  });
   if (isOwner) { assets = await window.claude?.use?.("assets").catch?.(() => null) ?? null; setupNoteBox(); }
   await loadSeen(u);
   let last = null;
