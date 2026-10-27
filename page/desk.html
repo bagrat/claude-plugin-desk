@@ -185,6 +185,9 @@ body:has(#p-waiting:not([hidden]) .dock) .toast { bottom: calc(80px + env(safe-a
 .lightbox .btn { background: #2e3440; border-color: #3b4252; color: #eceff4; }
 .answer { display: grid; gap: 8px; }
 .answer textarea { box-sizing: border-box; width: 100%; min-height: 76px; resize: vertical; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--edge); background: var(--bg); color: var(--fg); font: 15px/1.45 var(--f-ui); }
+.answer textarea.grows { overflow-y: hidden; }
+.kbd { font: 500 12px var(--f-mono); opacity: .75; }
+@media (hover: none) { .kbd { display: none; } }
 .sent { font-size: 13px; color: var(--quiet); }
 
 .row { background: var(--card); border: 1px solid var(--edge); border-radius: 12px; padding: 12px 16px; display: grid; gap: 4px; min-width: 0; }
@@ -279,6 +282,27 @@ const KIND = { decide: "Decide", review: "Review", check: "Check by hand", do: "
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
 const btn = (cls, text) => { const b = el("button", cls, text); b.type = "button"; return b; };
+// A text box to write in (#44): it grows with its text up to 60% of the viewport, then scrolls;
+// Cmd-Enter (Ctrl-Enter off a Mac) presses its Send button, and the button shows the shortcut.
+// A box drawn while hidden (a closed fold) is sized once it shows, so a restored draft opens whole.
+const MAC = /Mac|iPhone|iPad/.test(navigator.userAgentData?.platform || navigator.platform || "");
+function grow(ta) {
+  if (!ta.isConnected || !ta.offsetParent) return;
+  const max = Math.round(innerHeight * 0.6), edge = ta.offsetHeight - ta.clientHeight;
+  const was = ta.style.height; ta.style.height = "auto";
+  const want = ta.scrollHeight + edge, h = Math.min(want, max) + "px";
+  ta.style.height = was; if (ta.style.height !== h) ta.style.height = h;
+  ta.classList.toggle("grows", want <= max);
+}
+const sizer = typeof ResizeObserver === "function" ? new ResizeObserver((es) => requestAnimationFrame(() => es.forEach((e) => grow(e.target)))) : null;
+function composer(ta, send) {
+  ta.classList.add("grows");
+  ta.addEventListener("input", () => grow(ta));
+  ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.isComposing) { e.preventDefault(); send.click(); } });
+  send.append(" ", el("span", "kbd", MAC ? "⌘↵" : "Ctrl↵"));
+  send.title = (MAC ? "⌘" : "Ctrl") + "-Enter";
+  if (sizer) sizer.observe(ta);
+}
 const safeUrl = (u) => { try { const x = new URL(u); return x.protocol === "https:" ? x.href : null; } catch { return null; } };
 
 // Inline markup in stored text: **bold**, `code`, [label](https://…) and bare https:// links
@@ -503,11 +527,11 @@ function answerBox(id, t) {
   const box = el("div", "answer");
   const ta = el("textarea"); ta.value = drafts[id] || ""; ta.oninput = () => { drafts[id] = ta.value; };
   ta.placeholder = "Type or dictate your answer…"; ta.setAttribute("aria-label", "Your answer");
-  const send = btn("btn", "Send to the keeper");
+  const send = btn("btn", "Send to the keeper"); composer(ta, send);
   send.onclick = async () => {
     const v = ta.value.trim(); if (!v) { ta.focus(); return; }
     send.disabled = true; const keep = drafts[id]; delete drafts[id];
-    if (await answer(id, t, "text", v, send.closest(".card, details.task"))) ta.value = ""; else { drafts[id] = keep; send.disabled = false; }
+    if (await answer(id, t, "text", v, send.closest(".card, details.task"))) { ta.value = ""; grow(ta); } else { drafts[id] = keep; send.disabled = false; }
   };
   const row = el("div", "actions"); row.append(send);
   box.append(ta, row);
@@ -581,6 +605,7 @@ function setupNoteBox() {
   $("tab-note").hidden = false;
   if (!assets) $("note-pick-l").hidden = true;
   $("note-pick").onchange = (e) => { picked.push(...e.target.files); $("note-picked").textContent = picked.length ? picked.length + " image" + (picked.length > 1 ? "s" : "") + " added" : ""; e.target.value = ""; };
+  composer($("note-text"), $("note-send"));
   $("note-send").onclick = async () => {
     const ta = $("note-text"), text = ta.value.trim(), send = $("note-send");
     if (!text && !picked.length) { ta.focus(); return; }
@@ -592,7 +617,7 @@ function setupNoteBox() {
       for (const f of picked) { const a = await assets.upload(f); images.push({ id: a.id, caption: f.name || "" }); }
       await db.collection("inbox").doc(id).set(Object.assign({ text: text || "(see the images)", from: "page", at }, images.length ? { images } : {}));
     } catch { send.disabled = false; $("note-st").textContent = "Couldn't save it. Tell the keeper in the chat instead."; return; }
-    ta.value = ""; picked.length = 0; $("note-picked").textContent = ""; send.disabled = false;
+    ta.value = ""; grow(ta); picked.length = 0; $("note-picked").textContent = ""; send.disabled = false;
     const { how } = await sending;
     $("note-st").textContent = SENT[how]; toast(how === "sent" ? "Note sent to the keeper" : "Note saved");
   };
