@@ -73,6 +73,7 @@ svg.i { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round
 .ncard .rank svg { width: 17px; height: 17px; }
 .ncard.leaving { opacity: 0; transform: translateX(24px); transition: opacity .18s, transform .18s; }
 .seen-row { display: flex; justify-content: flex-end; }
+.ncard .sent:empty { display: none; }
 .btn.seen { min-width: 120px; border-color: var(--ok); color: var(--ok); }
 .btn.seen svg { width: 18px; height: 18px; }
 .toast button { margin-left: 10px; border: 0; background: none; padding: 4px 2px; color: inherit; font: 700 14px var(--f-ui); text-decoration: underline; cursor: pointer; }
@@ -523,10 +524,10 @@ function quickRow(id, t) {
   box.append(q.go, q.later, q.say);
   return box;
 }
-function answerBox(id, t) {
+function answerBox(id, t, what = "answer") {
   const box = el("div", "answer");
   const ta = el("textarea"); ta.value = drafts[id] || ""; ta.oninput = () => { drafts[id] = ta.value; };
-  ta.placeholder = "Type or dictate your answer…"; ta.setAttribute("aria-label", "Your answer");
+  ta.placeholder = "Type or dictate your " + what + "…"; ta.setAttribute("aria-label", "Your " + what);
   const send = btn("btn", "Send to the keeper"); composer(ta, send);
   send.onclick = async () => {
     const v = ta.value.trim(); if (!v) { ta.focus(); return; }
@@ -665,7 +666,7 @@ function body(id, t, docked) {
   const deps = depList(t.dependsOn); if (deps) b.append(field("Waiting on", deps));
   folds(id, t, b);
   const shots = gallery(t.images); if (shots) b.append(field("The boards (tap to enlarge)", shots));
-  if (t.answer) { const p = el("div", "answered"); p.append(el("b", null, "Your answer" + (t.answeredAt ? ", " + when(t.answeredAt) : "") + ": "), t.answer); b.append(p); }
+  if (t.answer) b.append(answered(t));
   if (db && isOwner && !docked && t.state === "waiting") { b.append(quickRow(id, t)); b.append(Object.assign(el("span", "sent", notes[id] || ""), { id: "st-" + id })); }
   const links = linkRow(stepLink(t) ? t.links.slice(1) : t.links); if (links) b.append(field("Links", links));
   const sess = linkRow(t.sessions); if (sess) b.append(field("Sessions", sess));
@@ -737,6 +738,8 @@ function row(id, t, extra) {
   const l = linkRow([...(t.sessions || []), ...(t.links || [])]); if (l) r.append(l);
   return r;
 }
+// The sent answer, on any card that has one.
+function answered(t) { const p = el("div", "answered"); p.append(el("b", null, "Your answer" + (t.answeredAt ? ", " + when(t.answeredAt) : "") + ": "), t.answer); return p; }
 // News (rule 14): something to know, never a question. One button, Seen, clears it: the row
 // is deleted from here (or, where the page can't delete, set done for the keeper to
 // delete). It posts no comment: acknowledging news wakes no one. Undo puts the row back.
@@ -766,7 +769,14 @@ function newsCard(id, t, where) {
   folds(id, t, bd);
   const shots = gallery(t.images); if (shots) bd.append(shots);
   const links = linkRow(t.links); if (links) bd.append(links);
+  if (t.answer) bd.append(answered(t));
   if (db && isOwner) {
+    // A note to the keeper (#46), folded so news stays light. It is sent as an answer is: the
+    // keeper wakes, and the card moves to In progress, since the keeper now has something to do.
+    const n = el("details", "more note"), key = "note:" + id; n.append(el("summary", null, "Add a note"));
+    n.open = !!ui.moreOpen[key] || !!drafts[id]; n.addEventListener("toggle", () => { ui.moreOpen[key] = n.open; });
+    n.append(answerBox(id, t, "note")); bd.append(n);
+    bd.append(Object.assign(el("span", "sent", notes[id] || ""), { id: "st-" + id }));
     const s = iconBtn("btn seen", "done", "Seen: clear it", "Seen"), r = el("div", "seen-row");
     s.onclick = () => { s.disabled = true; seenNews(id, t, c); };
     r.append(s); bd.append(r);
