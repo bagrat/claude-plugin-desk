@@ -25,7 +25,7 @@ export async function open(b, { db = {}, scheme = 'dark', hash = '', canDelete =
     const fire = (c) => setTimeout(() => { (subs[c] || []).forEach((f) => f(snap(c))); Object.entries(dsubs).forEach(([k, fs]) => { const [cc, id] = k.split('\n'); if (cc === c) fs.forEach((f) => f(dsnap(c, id))); }); }, 30);
     window.__put = (c, id, d) => { if (d == null) delete col(c)[id]; else col(c)[id] = d; fire(c); };
     const doc = (c, id) => ({
-      update: async (p) => { window.__log.push(['update', c, id, p]); Object.assign(col(c)[id], p); fire(c); },
+      update: async (p) => { window.__log.push(['update', c, id, p]); if (window.__failSave) throw Object.assign(new Error('no'), { code: 'unavailable' }); Object.assign(col(c)[id], p); fire(c); },
       delete: async () => { window.__log.push(['delete', c, id]); if (!canDelete) throw Object.assign(new Error('no'), { code: 'not_granted' }); delete col(c)[id]; fire(c); },
       set: async (d) => { window.__log.push(['set', c, id, d]); col(c)[id] = d; fire(c); },
       onSnapshot: (f) => { ((dsubs[c + '\n' + id]) ||= []).push(f); setTimeout(() => f(dsnap(c, id)), 10); return () => {}; },

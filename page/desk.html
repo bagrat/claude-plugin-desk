@@ -488,6 +488,8 @@ async function answer(id, t, kind, text, card) {
   try { await db.collection("tasks").doc(id).update(patch); }
   catch { say(id, "Couldn't save it. Say it in the chat instead."); toast("Couldn't save. Say it in the chat instead."); return false; }
   if (kind === "later") { toast("Back tomorrow at 9:00"); return true; }
+  // Saved: the box that sent it no longer holds its card in place (#40), so it moves at once.
+  if (card?.contains(document.activeElement)) document.activeElement.blur();
   toast(patch.state === "done" ? "Done. It leaves the page" : "Moved to In progress");
   const { how, code, detail } = await sending;
   // Why a send failed is kept on the row, so the keeper can see it.
