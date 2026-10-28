@@ -73,4 +73,23 @@ for (const height of [874, 600]) {
   await s.p.evaluate(() => window.__kb(874)); await s.p.waitForTimeout(200);
   ok(await s.p.$eval('.wrap', (n) => n.getBoundingClientRect().height) === 874, 'keyboard down: full height again');
   ok(s.errs.length === 0, 'no errors ' + s.errs.join(' ')); await s.ctx.close(); }
+// On a touch phone (2026-10-28, an iPhone's artifact viewer hides a strip at the bottom of its
+// frame that env(safe-area-inset-bottom) doesn't report): the bar keeps a home-indicator-sized
+// gap under it, and the end of the card still clears it.
+{ const s = await open(b, { db: { tasks: rows }, width: 402, height: 874 });
+  const g = await s.p.evaluate(() => ({ coarse: matchMedia('(pointer: coarse)').matches, bar: document.querySelector('.dock-row').getBoundingClientRect() }));
+  ok(g.coarse, 'the phone context is a touch one');
+  ok(g.bar.bottom <= 874 - 46, `the bar's bottom edge is at least 46px above the viewport's bottom (${g.bar.bottom})`);
+  await s.p.$eval('.scroller', (n) => { n.scrollTop = n.scrollHeight; }); await s.p.waitForTimeout(200);
+  const [last, top] = await s.p.evaluate(() => { const c = document.querySelector('.stage > .card'); return [c.getBoundingClientRect().bottom, document.querySelector('.dock-row').getBoundingClientRect().top]; });
+  ok(last <= top, `scrolled to the end, the card ends above the bar (${last} ≤ ${top})`);
+  // The readout in More: numbers for the next device report, and a Copy.
+  ok(!(await s.p.isVisible('.stage > .card .vp')), 'the readout is hidden while More is closed');
+  await s.p.click('.stage > .card .more > summary');
+  const t = await s.p.textContent('.stage > .card .vp-text');
+  ok(/^viewport: 874 × 402 · visual \d+ · safe-area \d+\/\d+ · dock bottom gap \d+$/.test(t), 'the readout gives the numbers: ' + t);
+  ok(/gap (4[6-9]|[5-9]\d)$/.test(t), 'and the gap is the touch one');
+  ok(await s.p.isVisible('.stage > .card .vp button'), 'with a Copy button');
+  ok(await s.p.$eval('.stage > .card .vp', (n) => !n.querySelector('*:not(span):not(button)')), 'built of plain text');
+  ok(s.errs.length === 0, 'no errors ' + s.errs.join(' ')); await s.ctx.close(); }
 await done(b);
