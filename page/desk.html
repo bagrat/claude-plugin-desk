@@ -1126,17 +1126,24 @@ function render(docs) {
   for (const b of document.querySelectorAll(".tabs button")) b.onclick = () => setTab(b.dataset.tab);
   $("p-waiting").addEventListener("wheel", onWheel, { passive: false });
   // While a keyboard is up, the shell fits what still shows of the screen, so the bar and the
-  // box being typed in sit above it (a pinch-zoom is left alone).
+  // box being typed in sit above it (a pinch-zoom is left alone). A keyboard is only up while a
+  // text field here has focus, and is measured against the visual viewport with nothing focused,
+  // not innerHeight: a viewer's sheet can keep it shorter and offset with no keyboard
+  // (2026-10-28), and then the shell stays the plain viewport height, header at the top.
   const vv = window.visualViewport, shell = document.querySelector(".wrap");
   if (vv) {
+    const typing = () => document.activeElement?.matches("textarea, input") && shell.contains(document.activeElement);
+    let base = vv.height, baseTop = vv.offsetTop;
     const fit = (e) => {
-      const kb = vv.scale < 1.01 && vv.height < innerHeight - 80;
+      if (!typing()) { base = vv.height; baseTop = vv.offsetTop; }
+      const kb = typing() && vv.scale < 1.01 && vv.height < base - 80;
       shell.classList.toggle("vv", kb);
-      shell.style.setProperty("--vv-h", vv.height + "px"); shell.style.setProperty("--vv-top", (kb ? vv.offsetTop : 0) + "px");
+      shell.style.setProperty("--vv-h", vv.height + "px"); shell.style.setProperty("--vv-top", (kb ? Math.max(0, vv.offsetTop - baseTop) : 0) + "px");
       const a = document.activeElement;
       if (kb && e?.type === "resize" && a?.matches("textarea") && $("scroller").contains(a)) a.scrollIntoView({ block: "nearest" });
     };
     vv.addEventListener("resize", fit); vv.addEventListener("scroll", fit); fit();
+    addEventListener("orientationchange", fit); document.addEventListener("focusin", fit); document.addEventListener("focusout", () => setTimeout(fit));
   }
   document.addEventListener("visibilitychange", () => {
     if (document.hidden || !ui.backToTop) return;
