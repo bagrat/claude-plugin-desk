@@ -3,8 +3,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
-/* Layout: one narrow column, phone first. A sticky bar with the Desk's icon and its tabs (News
-   first, only when there is news; the note box last, owner only), then the notes being sorted.
+/* Layout: one narrow column, phone first, as an app shell the viewport's height: a bar with the
+   Desk's icon and its tabs (News first, only when there is news; the note box last, owner
+   only), and below it the one region that scrolls, the notes being sorted first.
    It opens on News when there is some; Waiting shows one item at a time, in the order to do
    them, with one-tap answers. Colors: Frost below; the Desk's theme (THEMES) overrides them. */
 :root {
@@ -23,16 +24,22 @@
   --accent: #88c0d0; --accent-ink: #1f242c; --decide: #c9a3d4; --review: #88c0d0; --check: #ebcb8b; --do: #a3be8c;
   --chip-bg: #3b4252; --done: #9aa3b2; --new: #e5a27a; --ok: #a3be8c; --raise: #3b4252; color-scheme: dark }
 
+html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
 body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--f-ui); }
-body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
-.wrap { max-width: 720px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 0 48px; }
+/* The shell (2026-10-28): exactly the viewport (the dynamic one where known; while a keyboard is
+   up, the part of it still showing), the header pinned on top, the answer bar pinned at the
+   bottom, and only the scroller between them moves; the document itself never scrolls. */
+.wrap { position: relative; top: var(--vv-top, 0px); display: flex; flex-direction: column; box-sizing: border-box; height: 100vh; height: 100dvh; max-width: 720px; margin: 0 auto; padding-top: env(safe-area-inset-top, 0px); }
+.wrap.vv { height: var(--vv-h); }
+.wrap > header.bar, .scroller { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.scroller { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-bottom: calc(48px + env(safe-area-inset-bottom, 0px)); }
 a { color: var(--accent); }
 a.bare { overflow-wrap: anywhere; }
 a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
 [hidden] { display: none !important; }
 
 /* The header is one line: the Desk's icon, then the tabs, each an icon and maybe a count. */
-header.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); border-bottom: 1px solid var(--edge); display: flex; align-items: center; gap: 6px; height: 50px; }
+header.bar { flex: none; position: relative; z-index: 5; background: var(--bg); border-bottom: 1px solid var(--edge); display: flex; align-items: center; gap: 6px; height: 50px; }
 .logo { flex: none; width: 30px; height: 30px; }
 .logo { display: grid; place-items: center; border-radius: 8px; overflow: hidden; font: 700 15px var(--f-ui); line-height: 1; }
 .logo.emoji { font-size: 22px; }
@@ -143,14 +150,14 @@ blockquote { margin: 0; padding: 2px 64px 2px 12px; border-left: 3px solid var(-
 .deps .d-building .mk { color: var(--accent); } .deps .d-open .mk { color: var(--quiet); }
 .deps button.it { border: 0; background: none; padding: 0; text-align: left; font: inherit; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .deps .d-done button.it { color: var(--quiet); }
-/* An opened card clears the sticky bar. */
-details.task, .row { scroll-margin-top: calc(env(safe-area-inset-top, 0px) + 60px); }
+/* An opened card shows a little space above it. */
+details.task, .row { scroll-margin-top: 10px; }
 .toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 30; max-width: calc(100vw - 32px); background: var(--fg); color: var(--bg); padding: 8px 14px; border-radius: 10px; font-size: 14px; text-align: center; }
 
 /* One at a time: the answers and the arrows sit in a bar at the bottom, in reach of a thumb,
    so a long item never pushes them off screen. Sized for a 402pt-wide phone (iPhone 17). */
 /* Floating, inset from the sides so the screen's rounded corners never clip a button. */
-.dock { position: fixed; left: 0; right: 0; bottom: calc(16px + env(safe-area-inset-bottom, 0px) * 0.35); z-index: 6; padding: 0 44px; pointer-events: none; }
+.dock { position: absolute; left: 0; right: 0; bottom: calc(16px + env(safe-area-inset-bottom, 0px) * 0.35); z-index: 6; padding: 0 44px; pointer-events: none; }
 .dock-in { max-width: 340px; margin: 0 auto; display: grid; gap: 8px; justify-items: center; }
 .dock-row { width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; pointer-events: auto; }
 .dock-row .btn { padding: 0 6px; min-height: 46px; border-radius: 14px; background: var(--raise); border-color: color-mix(in srgb, var(--edge) 60%, var(--quiet)); box-shadow: 0 8px 22px rgba(0, 0, 0, .32), 0 1px 3px rgba(0, 0, 0, .22); }
@@ -160,11 +167,12 @@ details.task, .row { scroll-margin-top: calc(env(safe-area-inset-top, 0px) + 60p
 .btn.later { color: var(--check); }
 .dock .sent { text-align: center; min-height: 0; padding: 4px 10px; border-radius: 999px; background: var(--card); box-shadow: 0 4px 12px rgba(0, 0, 0, .25); }
 .dock .sent:empty { display: none; }
-body:has(#p-waiting:not([hidden]) .dock) .wrap { padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px) * 0.35); }
+/* The card's end, and a box scrolled into view, clear the bar. */
+body:has(#p-waiting:not([hidden]) .dock) .scroller { padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px) * 0.35); scroll-padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px) * 0.35); }
 body:has(#p-waiting:not([hidden]) .dock) .toast { bottom: calc(80px + env(safe-area-inset-bottom, 0px) * 0.35); }
 .count { font-size: 13px; color: var(--quiet); font-variant-numeric: tabular-nums; margin: 4px 0 6px; }
 /* The dashes stay pinned under the tabs while a card scrolls (2026-10-25). */
-#p-waiting .count { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 50px); z-index: 4; background: var(--bg); margin: 0 0 6px; padding: 4px 0 2px; }
+#p-waiting .count { position: sticky; top: 0; z-index: 4; background: var(--bg); margin: 0 0 6px; padding: 4px 0 2px; }
 .dashes { display: flex; align-items: center; gap: 4px; }
 .dash { flex: 1; min-width: 0; height: 22px; border: 0; padding: 0; background: none; position: relative; cursor: pointer; }
 .dash::after { content: ""; position: absolute; left: 0; right: 0; top: 9px; height: 4px; border-radius: 2px; background: var(--edge); }
@@ -220,6 +228,7 @@ footer { margin-top: 28px; font-size: 13px; color: var(--quiet); max-width: 65ch
       <button role="tab" id="tab-note" data-tab="note" aria-label="Drop a note" hidden></button>
     </nav>
   </header>
+  <main class="scroller" id="scroller">
 
   <section class="inbox" id="inbox" aria-label="Notes" hidden>
     <details class="strip" id="strip" hidden><summary><span class="pulse"></span><span id="strip-n"></span></summary><ul id="strip-l"></ul></details>
@@ -257,6 +266,7 @@ footer { margin-top: 28px; font-size: 13px; color: var(--quiet); max-width: 65ch
       <span class="sent" id="note-st"></span>
     </div>
   </section>
+  </main>
 
 </div>
 
@@ -876,12 +886,14 @@ function fill(list, nodes, emptyText) {
 const ui = { tab: "waiting", focus: store.get("focus", null), showLater: false, deck: [], news: [], rows: {}, open: new Set(), moreOpen: {} };
 const TABS = ["news", "waiting", "working", "scheduled", "all", "note"];
 const home = () => ui.news.length ? "news" : "waiting";
+// Only the scroller moves (the shell); a new tab or card starts at its top.
+const toTop = () => $("scroller").scrollTo({ top: 0 });
 function setTab(tab) {
   ui.tab = tab;
   for (const b of document.querySelectorAll(".tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === tab));
   for (const p of TABS) $("p-" + p).hidden = p !== tab;
   if (tab === "news") for (const id of ui.news) markSeen(id, ui.rows[id]);
-  window.scrollTo({ top: 0 });
+  toTop();
 }
 // Move on after an answer: to the item that came next when it was tapped. The save re-sorts
 // the list (an answered item moves to the end), so the next one is picked before saving.
@@ -889,7 +901,7 @@ function setTab(tab) {
 const wrap = (k) => { const n = ui.deck.length; return ((k % n) + n) % n; };
 const nextAfter = (id) => { const i = ui.deck.indexOf(id); return ui.deck.length > 1 ? ui.deck[wrap(i + 1)] : null; };
 // Every move to another card starts it at the top, not where the last one was scrolled to.
-function advance(next) { ui.focus = next; drawWaiting(); window.scrollTo({ top: 0 }); }
+function advance(next) { ui.focus = next; drawWaiting(); toTop(); }
 
 // The card follows a finger, or a two-finger swipe on a trackpad, with the next or previous
 // item sliding in beside it. Let go past a quarter of the width, or flick, to move on;
@@ -933,7 +945,7 @@ function swiper(stage, card, i) {
   }
   const commit = (s) => {
     busy = true; place(-s * w(), true);
-    setTimeout(() => { ui.focus = deck[at(s)]; drawWaiting(true); window.scrollTo({ top: 0 }); }, reduce ? 0 : SLIDE_MS);
+    setTimeout(() => { ui.focus = deck[at(s)]; drawWaiting(true); toTop(); }, reduce ? 0 : SLIDE_MS);
   };
   return {
     get busy() { return busy; },
@@ -1016,7 +1028,7 @@ function go(step) {
   if (j === i) return;
   if (ui.tab === "waiting" && ui.sw && $("t-" + ui.focus)?.isConnected) { ui.sw.to(step); return; }
   ui.focus = ui.deck[j]; drawWaiting();
-  window.scrollTo({ top: 0 });
+  toTop();
 }
 
 function render(docs) {
@@ -1088,6 +1100,19 @@ function render(docs) {
   for (const b of document.querySelectorAll(".tabs button")) b.prepend(icon(b.dataset.tab));
   for (const b of document.querySelectorAll(".tabs button")) b.onclick = () => setTab(b.dataset.tab);
   $("p-waiting").addEventListener("wheel", onWheel, { passive: false });
+  // While a keyboard is up, the shell fits what still shows of the screen, so the bar and the
+  // box being typed in sit above it (a pinch-zoom is left alone).
+  const vv = window.visualViewport, shell = document.querySelector(".wrap");
+  if (vv) {
+    const fit = (e) => {
+      const kb = vv.scale < 1.01 && vv.height < innerHeight - 80;
+      shell.classList.toggle("vv", kb);
+      shell.style.setProperty("--vv-h", vv.height + "px"); shell.style.setProperty("--vv-top", (kb ? vv.offsetTop : 0) + "px");
+      const a = document.activeElement;
+      if (kb && e?.type === "resize" && a?.matches("textarea") && $("scroller").contains(a)) a.scrollIntoView({ block: "nearest" });
+    };
+    vv.addEventListener("resize", fit); vv.addEventListener("scroll", fit); fit();
+  }
   document.addEventListener("visibilitychange", () => {
     if (document.hidden || !ui.backToTop) return;
     ui.backToTop = false; setTab(home()); if (ui.deck.length) advance(ui.deck[0]);
