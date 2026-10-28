@@ -14,7 +14,10 @@ export const done = async (b) => { await b.close(); console.log(fails ? `${fails
 
 // db: {collection: {id: row}}; the page's writes land in window.__log and in the store.
 // window.__hook.set / .upload / .send (async, may throw {code}) run before a write, upload or send.
-export async function open(b, { db = {}, scheme = 'dark', hash = '', canDelete = true, width = 402, height = 874, page = {}, owner = true, assets = true, zone } = {}) {
+// The page is wrapped as the Artifact platform wraps it at publish: a viewport meta with
+// viewport-fit=cover and a reset that pads :root by the top and bottom safe-area insets.
+// Chromium can't fake env(), so insets: {top, bottom} stands in with that padding set in px.
+export async function open(b, { db = {}, scheme = 'dark', hash = '', canDelete = true, width = 402, height = 874, page = {}, owner = true, assets = true, zone, insets } = {}) {
   const ctx = await b.newContext({ ...(zone ? { timezoneId: zone } : {}), viewport: { width, height }, deviceScaleFactor: 2, colorScheme: scheme, hasTouch: true, isMobile: width < 500 });
   const p = await ctx.newPage();
   const errs = []; p.on('pageerror', (e) => errs.push(String(e)));
@@ -37,7 +40,9 @@ export async function open(b, { db = {}, scheme = 'dark', hash = '', canDelete =
     window.claude = { use: async (n) => n === 'db' ? dbo : n === 'user' ? { isOwner: () => owner } : n === 'comments' ? cm : n === 'assets' && assets ? as : null };
   }, { db, canDelete, owner, assets });
   const html = render(page);
-  await p.route('https://x.test/', (r) => r.fulfill({ contentType: 'text/html', body: '<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"></head><body>' + html + '</body></html>' }));
+  await p.route('https://x.test/', (r) => r.fulfill({ contentType: 'text/html', body: '<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">' +
+    '<style>:root { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom) }</style>' +
+    (insets ? `<style>:root { padding-top: ${insets.top}px; padding-bottom: ${insets.bottom}px }</style>` : '') + '</head><body>' + html + '</body></html>' }));
   await p.route('https://x.test/_blob/*', (r) => r.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30"><rect width="30" height="30" fill="#c33"/></svg>' }));
   await p.goto('https://x.test/' + hash); await p.waitForTimeout(500);
   return { p, ctx, errs, tab: () => p.$eval('[role=tab][aria-selected=true]', (n) => n.dataset.tab), log: () => p.evaluate(() => window.__log) };

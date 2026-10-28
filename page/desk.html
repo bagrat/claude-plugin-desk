@@ -24,15 +24,19 @@
   --accent: #88c0d0; --accent-ink: #1f242c; --decide: #c9a3d4; --review: #88c0d0; --check: #ebcb8b; --do: #a3be8c;
   --chip-bg: #3b4252; --done: #9aa3b2; --new: #e5a27a; --ok: #a3be8c; --raise: #3b4252; color-scheme: dark }
 
+/* The platform wraps the page in a skeleton that pads :root by the top and bottom safe areas;
+   the shell sizes itself to what's inside that padding (height: 100%, never 100vh), and the
+   root shares the page's color so its padding bands don't show. */
+html { box-sizing: border-box; background: var(--bg); }
 html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
 body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--f-ui); }
-/* The shell (2026-10-28): exactly the viewport (the dynamic one where known; while a keyboard is
-   up, the part of it still showing), the header pinned on top, the answer bar pinned at the
-   bottom, and only the scroller between them moves; the document itself never scrolls. */
-.wrap { position: relative; top: var(--vv-top, 0px); display: flex; flex-direction: column; box-sizing: border-box; height: 100vh; height: 100dvh; max-width: 720px; margin: 0 auto; padding-top: env(safe-area-inset-top, 0px); }
+/* The shell (2026-10-28): exactly the root's content box (while a keyboard is up, the part of
+   it still showing), the header pinned on top, the answer bar pinned at the bottom, and only
+   the scroller between them moves; the document itself never scrolls. */
+.wrap { position: relative; top: var(--vv-top, 0px); display: flex; flex-direction: column; box-sizing: border-box; height: 100%; max-width: 720px; margin: 0 auto; }
 .wrap.vv { height: var(--vv-h); }
 .wrap > header.bar, .scroller { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
-.scroller { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-bottom: calc(48px + env(safe-area-inset-bottom, 0px)); }
+.scroller { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-bottom: 48px; }
 a { color: var(--accent); }
 a.bare { overflow-wrap: anywhere; }
 a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
@@ -160,11 +164,13 @@ details.task, .row { scroll-margin-top: 10px; }
 /* One at a time: the answers and the arrows sit in a bar at the bottom, in reach of a thumb,
    so a long item never pushes them off screen. Sized for a 402pt-wide phone (iPhone 17). */
 /* Floating, inset from the sides so the screen's rounded corners never clip a button. */
-/* The gap under the answer bar. On touch screens it's at least a home indicator's height: an
-   app's viewer can hide a strip at the bottom of its frame that the safe area doesn't report. */
-:root { --dock-gap: calc(16px + env(safe-area-inset-bottom, 0px) * 0.35); }
-@media (pointer: coarse) { :root { --dock-gap: calc(max(env(safe-area-inset-bottom, 0px), 34px) + 12px); } }
-@supports (-webkit-touch-callout: none) { :root { --dock-gap: calc(max(env(safe-area-inset-bottom, 0px), 34px) + 12px); } }
+/* The gap under the answer bar, above the root's bottom padding (which already clears the
+   reported safe area). On touch screens an app's viewer can hide a home-indicator-sized strip
+   (34px) at the bottom of its frame that the safe area doesn't report, so the gap is a 12px
+   margin plus whatever part of that strip the root's padding doesn't already cover. */
+:root { --dock-gap: 16px; }
+@media (pointer: coarse) { :root { --dock-gap: calc(12px + max(0px, 34px - env(safe-area-inset-bottom, 0px))); } }
+@supports (-webkit-touch-callout: none) { :root { --dock-gap: calc(12px + max(0px, 34px - env(safe-area-inset-bottom, 0px))); } }
 .dock { position: absolute; left: 0; right: 0; bottom: var(--dock-gap); z-index: 6; padding: 0 44px; pointer-events: none; }
 .dock-in { max-width: 340px; margin: 0 auto; display: grid; gap: 8px; justify-items: center; }
 .dock-row { width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; pointer-events: auto; }
@@ -778,9 +784,10 @@ function body(id, t, docked) {
 function viewportMeasure() {
   let pr = document.querySelector(".vp-probe");
   if (!pr) { pr = el("div", "vp-probe"); document.body.append(pr); }
-  const cs = getComputedStyle(pr), px = (v) => Math.round(parseFloat(v) || 0);
+  const cs = getComputedStyle(pr), rs = getComputedStyle(document.documentElement), px = (v) => Math.round(parseFloat(v) || 0);
   return "viewport: " + innerHeight + " × " + innerWidth + " · visual " + Math.round(window.visualViewport?.height ?? innerHeight) +
-    " · safe-area " + px(cs.paddingTop) + "/" + px(cs.paddingBottom) + " · dock bottom gap " + px(cs.height);
+    " · safe-area " + px(cs.paddingTop) + "/" + px(cs.paddingBottom) + " · root pad " + px(rs.paddingTop) + "/" + px(rs.paddingBottom) +
+    " · dock bottom gap " + px(cs.height);
 }
 function viewportLine(more) {
   const line = el("div", "vp"), text = el("span", "vp-text"), cp = btn("btn", "Copy");
@@ -1138,7 +1145,9 @@ function render(docs) {
       if (!typing()) { base = vv.height; baseTop = vv.offsetTop; }
       const kb = typing() && vv.scale < 1.01 && vv.height < base - 80;
       shell.classList.toggle("vv", kb);
-      shell.style.setProperty("--vv-h", vv.height + "px"); shell.style.setProperty("--vv-top", (kb ? Math.max(0, vv.offsetTop - baseTop) : 0) + "px");
+      // The shell starts under the root's top padding; the bottom one is under the keyboard.
+      const padTop = parseFloat(getComputedStyle(document.documentElement).paddingTop) || 0;
+      shell.style.setProperty("--vv-h", Math.max(0, vv.height - padTop) + "px"); shell.style.setProperty("--vv-top", (kb ? Math.max(0, vv.offsetTop - baseTop) : 0) + "px");
       const a = document.activeElement;
       if (kb && e?.type === "resize" && a?.matches("textarea") && $("scroller").contains(a)) a.scrollIntoView({ block: "nearest" });
     };
