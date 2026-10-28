@@ -14,8 +14,8 @@ export const done = async (b) => { await b.close(); console.log(fails ? `${fails
 
 // db: {collection: {id: row}}; the page's writes land in window.__log and in the store.
 // window.__hook.set / .upload / .send (async, may throw {code}) run before a write, upload or send.
-export async function open(b, { db = {}, scheme = 'dark', hash = '', canDelete = true, width = 402, page = {}, owner = true, assets = true, zone } = {}) {
-  const ctx = await b.newContext({ ...(zone ? { timezoneId: zone } : {}), viewport: { width, height: 874 }, deviceScaleFactor: 2, colorScheme: scheme, hasTouch: true, isMobile: width < 500 });
+export async function open(b, { db = {}, scheme = 'dark', hash = '', canDelete = true, width = 402, height = 874, page = {}, owner = true, assets = true, zone } = {}) {
+  const ctx = await b.newContext({ ...(zone ? { timezoneId: zone } : {}), viewport: { width, height }, deviceScaleFactor: 2, colorScheme: scheme, hasTouch: true, isMobile: width < 500 });
   const p = await ctx.newPage();
   const errs = []; p.on('pageerror', (e) => errs.push(String(e)));
   await p.addInitScript(({ db, canDelete, owner, assets }) => {
