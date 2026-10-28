@@ -73,6 +73,33 @@ for (const height of [874, 600]) {
   await s.p.evaluate(() => window.__kb(874)); await s.p.waitForTimeout(200);
   ok(await s.p.$eval('.wrap', (n) => n.getBoundingClientRect().height) === 874, 'keyboard down: full height again');
   ok(s.errs.length === 0, 'no errors ' + s.errs.join(' ')); await s.ctx.close(); }
+// A viewer's sheet (2026-10-28): with nothing focused, its visual viewport is 90px shorter than
+// innerHeight and 60px down. That's no keyboard: the shell fills the viewport, header at the top,
+// no band under it. Focus a box and the visual viewport shrinks further: that's the keyboard.
+{ const s = await open(b, { db: { tasks: rows }, height: 874 });
+  await s.p.addInitScript(() => {
+    const vv = new EventTarget(); Object.assign(vv, { height: innerHeight - 90, width: innerWidth, offsetTop: 60, offsetLeft: 0, scale: 1 });
+    Object.defineProperty(window, 'visualViewport', { get: () => vv }); window.__kb = (h) => { vv.height = h; vv.dispatchEvent(new Event('resize')); };
+  });
+  await s.p.reload(); await s.p.waitForTimeout(500);
+  const shell = () => s.p.evaluate(() => [document.querySelector('.wrap').getBoundingClientRect(), document.querySelector('header.bar').getBoundingClientRect().top, document.querySelector('.dock-row').getBoundingClientRect().bottom]);
+  let [w, head, dock] = await shell();
+  ok(w.top === 0 && w.bottom === 874, `in the sheet, no keyboard: the shell fills the viewport, no band (${w.top}–${w.bottom})`);
+  ok(head === 0, `and the header is at the top (${head})`);
+  await s.p.evaluate(() => window.__kb(innerHeight - 90)); await s.p.waitForTimeout(100);
+  [w, head] = await shell();
+  ok(w.bottom === 874 && head === 0, `a resize with nothing focused changes nothing (${w.bottom}, ${head})`);
+  const ta = '.stage > .card .answer textarea';
+  await s.p.click('.stage > .card .more > summary'); await s.p.click(ta);
+  [w, head] = await shell();
+  ok(w.bottom === 874 && head === 0, `focusing a box alone isn't a keyboard (${w.bottom}, ${head})`);
+  await s.p.evaluate(() => window.__kb(400)); await s.p.waitForTimeout(200);
+  [w, head, dock] = await shell();
+  ok(w.height === 400 && dock <= 400, `the keyboard comes up: the shell fits above it (${w.height}, bar ${dock})`);
+  await s.p.evaluate(() => window.__kb(innerHeight - 90)); await s.p.$eval(ta, (n) => n.blur()); await s.p.waitForTimeout(200);
+  [w, head] = await shell();
+  ok(w.top === 0 && w.bottom === 874 && head === 0, `it goes down: full again, header at the top (${w.top}–${w.bottom})`);
+  ok(s.errs.length === 0, 'no errors ' + s.errs.join(' ')); await s.ctx.close(); }
 // On a touch phone (2026-10-28, an iPhone's artifact viewer hides a strip at the bottom of its
 // frame that env(safe-area-inset-bottom) doesn't report): the bar keeps a home-indicator-sized
 // gap under it, and the end of the card still clears it.
@@ -85,7 +112,7 @@ for (const height of [874, 600]) {
   ok(last <= top, `scrolled to the end, the card ends above the bar (${last} ≤ ${top})`);
   // The readout in More: numbers for the next device report, and a Copy.
   ok(!(await s.p.isVisible('.stage > .card .vp')), 'the readout is hidden while More is closed');
-  await s.p.click('.stage > .card .more > summary');
+  await s.p.click('.stage > .card .more > summary'); await s.p.waitForTimeout(100);
   const t = await s.p.textContent('.stage > .card .vp-text');
   ok(/^viewport: 874 × 402 · visual \d+ · safe-area \d+\/\d+ · dock bottom gap \d+$/.test(t), 'the readout gives the numbers: ' + t);
   ok(/gap (4[6-9]|[5-9]\d)$/.test(t), 'and the gap is the touch one');
