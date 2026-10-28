@@ -114,9 +114,42 @@ for (const height of [874, 600]) {
   ok(!(await s.p.isVisible('.stage > .card .vp')), 'the readout is hidden while More is closed');
   await s.p.click('.stage > .card .more > summary'); await s.p.waitForTimeout(100);
   const t = await s.p.textContent('.stage > .card .vp-text');
-  ok(/^viewport: 874 × 402 · visual \d+ · safe-area \d+\/\d+ · dock bottom gap \d+$/.test(t), 'the readout gives the numbers: ' + t);
+  ok(/^viewport: 874 × 402 · visual \d+ · safe-area \d+\/\d+ · root pad \d+\/\d+ · dock bottom gap \d+$/.test(t), 'the readout gives the numbers: ' + t);
   ok(/gap (4[6-9]|[5-9]\d)$/.test(t), 'and the gap is the touch one');
   ok(await s.p.isVisible('.stage > .card .vp button'), 'with a Copy button');
   ok(await s.p.$eval('.stage > .card .vp', (n) => !n.querySelector('*:not(span):not(button)')), 'built of plain text');
+  ok(s.errs.length === 0, 'no errors ' + s.errs.join(' ')); await s.ctx.close(); }
+// Inside the platform's skeleton on an iPhone (2026-10-28): the root is padded by the safe area
+// (47 top, 34 bottom here). The shell fits inside that padding: the document doesn't scroll, the
+// header starts under the top padding, the bar sits above the bottom one, and nothing outside the
+// shell shows in another color.
+{ const s = await open(b, { db: { tasks: rows }, width: 402, height: 874, insets: { top: 47, bottom: 34 } });
+  const g = await s.p.evaluate(() => {
+    const r = (q) => document.querySelector(q).getBoundingClientRect(), bg = (n) => getComputedStyle(n).backgroundColor;
+    return { sh: document.scrollingElement.scrollHeight, vh: innerHeight, head: r('header.bar').top, wrap: r('.wrap'), dock: r('.dock-row').bottom,
+      html: bg(document.documentElement), body: bg(document.body) };
+  });
+  ok(g.sh === g.vh, `the document is exactly the viewport (${g.sh} = ${g.vh})`);
+  ok(g.head === 47, `the header starts under the root's top padding (${g.head})`);
+  ok(g.wrap.top === 47 && g.wrap.bottom === 874 - 34, `the shell fills the root's content box (${g.wrap.top}–${g.wrap.bottom})`);
+  ok(g.dock <= 874 - 34 - 12 && g.dock > 874 - 34 - 120, `the bar sits on screen above the root's bottom padding (${g.dock})`);
+  ok(g.html === g.body, `the root's padding bands are the page's color (${g.html} / ${g.body})`);
+  await s.p.mouse.move(200, 400); await s.p.mouse.wheel(0, 3000); await s.p.waitForTimeout(300);
+  ok(await s.p.evaluate(() => document.scrollingElement.scrollTop === 0) && (await s.p.$eval('header.bar', (n) => n.getBoundingClientRect().top)) === 47, 'a wheel scrolls the card, not the document');
+  await s.p.click('.stage > .card .more > summary'); await s.p.waitForTimeout(100);
+  const t = await s.p.textContent('.stage > .card .vp-text');
+  ok(/ · root pad 47\/34 · /.test(t), 'the readout shows the root padding: ' + t);
+  // A keyboard (stand-in visual viewport 400px): the shell still ends at its top.
+  await s.p.addInitScript(() => {
+    const vv = new EventTarget(); Object.assign(vv, { height: innerHeight, width: innerWidth, offsetTop: 0, offsetLeft: 0, scale: 1 });
+    Object.defineProperty(window, 'visualViewport', { get: () => vv }); window.__kb = (h) => { vv.height = h; vv.dispatchEvent(new Event('resize')); };
+  });
+  await s.p.reload(); await s.p.waitForTimeout(500);
+  const ta = '.stage > .card .answer textarea';
+  await s.p.click('.stage > .card .more > summary'); await s.p.click(ta);
+  await s.p.evaluate(() => window.__kb(400)); await s.p.waitForTimeout(200);
+  const [w, bar] = await s.p.evaluate(() => [document.querySelector('.wrap').getBoundingClientRect(), document.querySelector('.dock-row').getBoundingClientRect().bottom]);
+  ok(w.top === 47 && w.bottom === 400 && bar <= 400, `keyboard up: the shell ends at the keyboard (${w.top}–${w.bottom}, bar ${bar})`);
+  ok(await s.p.evaluate(() => document.scrollingElement.scrollTop === 0), 'and the document still does not scroll');
   ok(s.errs.length === 0, 'no errors ' + s.errs.join(' ')); await s.ctx.close(); }
 await done(b);
