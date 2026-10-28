@@ -142,6 +142,9 @@ blockquote { margin: 0; padding: 2px 64px 2px 12px; border-left: 3px solid var(-
 .fold > summary::before { content: "▸"; margin-right: 8px; transition: transform .15s; }
 .fold[open] > summary::before { transform: rotate(90deg); }
 .id { font: 12px var(--f-mono); color: var(--quiet); }
+.vp { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font: 12px var(--f-mono); color: var(--quiet); }
+.vp .btn { min-height: 28px; padding: 0 10px; font-size: 12px; }
+.vp-probe { position: fixed; left: 0; top: 0; width: 0; visibility: hidden; pointer-events: none; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); height: var(--dock-gap); box-sizing: content-box; }
 /* What a card waits on: ✓ done, ◐ building, ○ open; a linked item opens its card. */
 .deps { list-style: none; margin: 0; padding: 0 !important; display: grid; gap: 4px; }
 .deps li { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 6px; align-items: baseline; }
@@ -157,7 +160,12 @@ details.task, .row { scroll-margin-top: 10px; }
 /* One at a time: the answers and the arrows sit in a bar at the bottom, in reach of a thumb,
    so a long item never pushes them off screen. Sized for a 402pt-wide phone (iPhone 17). */
 /* Floating, inset from the sides so the screen's rounded corners never clip a button. */
-.dock { position: absolute; left: 0; right: 0; bottom: calc(16px + env(safe-area-inset-bottom, 0px) * 0.35); z-index: 6; padding: 0 44px; pointer-events: none; }
+/* The gap under the answer bar. On touch screens it's at least a home indicator's height: an
+   app's viewer can hide a strip at the bottom of its frame that the safe area doesn't report. */
+:root { --dock-gap: calc(16px + env(safe-area-inset-bottom, 0px) * 0.35); }
+@media (pointer: coarse) { :root { --dock-gap: calc(max(env(safe-area-inset-bottom, 0px), 34px) + 12px); } }
+@supports (-webkit-touch-callout: none) { :root { --dock-gap: calc(max(env(safe-area-inset-bottom, 0px), 34px) + 12px); } }
+.dock { position: absolute; left: 0; right: 0; bottom: var(--dock-gap); z-index: 6; padding: 0 44px; pointer-events: none; }
 .dock-in { max-width: 340px; margin: 0 auto; display: grid; gap: 8px; justify-items: center; }
 .dock-row { width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; pointer-events: auto; }
 .dock-row .btn { padding: 0 6px; min-height: 46px; border-radius: 14px; background: var(--raise); border-color: color-mix(in srgb, var(--edge) 60%, var(--quiet)); box-shadow: 0 8px 22px rgba(0, 0, 0, .32), 0 1px 3px rgba(0, 0, 0, .22); }
@@ -168,8 +176,8 @@ details.task, .row { scroll-margin-top: 10px; }
 .dock .sent { text-align: center; min-height: 0; padding: 4px 10px; border-radius: 999px; background: var(--card); box-shadow: 0 4px 12px rgba(0, 0, 0, .25); }
 .dock .sent:empty { display: none; }
 /* The card's end, and a box scrolled into view, clear the bar. */
-body:has(#p-waiting:not([hidden]) .dock) .scroller { padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px) * 0.35); scroll-padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px) * 0.35); }
-body:has(#p-waiting:not([hidden]) .dock) .toast { bottom: calc(80px + env(safe-area-inset-bottom, 0px) * 0.35); }
+body:has(#p-waiting:not([hidden]) .dock) .scroller { padding-bottom: calc(var(--dock-gap) + 68px); scroll-padding-bottom: calc(var(--dock-gap) + 68px); }
+body:has(#p-waiting:not([hidden]) .dock) .toast { bottom: calc(var(--dock-gap) + 64px); }
 .count { font-size: 13px; color: var(--quiet); font-variant-numeric: tabular-nums; margin: 4px 0 6px; }
 /* The dashes stay pinned under the tabs while a card scrolls (2026-10-25). */
 #p-waiting .count { position: sticky; top: 0; z-index: 4; background: var(--bg); margin: 0 0 6px; padding: 4px 0 2px; }
@@ -762,9 +770,26 @@ function body(id, t, docked) {
     };
     acts.append(done);
   }
-  inner.append(acts, el("span", "id", "id: " + id));
+  inner.append(acts, el("span", "id", "id: " + id), viewportLine(more));
   more.append(inner); b.append(more);
   return b;
+}
+// What this screen measures, for a report on how the page sits in a viewer: read when More opens.
+function viewportMeasure() {
+  let pr = document.querySelector(".vp-probe");
+  if (!pr) { pr = el("div", "vp-probe"); document.body.append(pr); }
+  const cs = getComputedStyle(pr), px = (v) => Math.round(parseFloat(v) || 0);
+  return "viewport: " + innerHeight + " × " + innerWidth + " · visual " + Math.round(window.visualViewport?.height ?? innerHeight) +
+    " · safe-area " + px(cs.paddingTop) + "/" + px(cs.paddingBottom) + " · dock bottom gap " + px(cs.height);
+}
+function viewportLine(more) {
+  const line = el("div", "vp"), text = el("span", "vp-text"), cp = btn("btn", "Copy");
+  const fill = () => { text.textContent = viewportMeasure(); };
+  more.addEventListener("toggle", () => { if (more.open) fill(); });
+  if (more.open) requestAnimationFrame(fill);
+  cp.onclick = async () => { fill(); toast(await copyText(text.textContent) ? "Copied" : "Couldn't copy here"); };
+  line.append(text, cp);
+  return line;
 }
 // A card that waits on others lists them (dependsOn), each with its state; tap a linked one
 // to open its card. A link whose card is gone stays plain text.
