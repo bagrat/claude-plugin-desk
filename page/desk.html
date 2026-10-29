@@ -172,13 +172,11 @@ details.task, .row { scroll-margin-top: 10px; }
    so a long item never pushes them off screen. Sized for a 402pt-wide phone (iPhone 17). */
 /* Floating, inset from the sides so the screen's rounded corners never clip a button. */
 /* The gap under the answer bar, from the screen's bottom edge (the shell reaches it). Off touch,
-   16px over the bottom inset. On touch screens an app's viewer can hide a home-indicator-sized
-   strip (34px) at the bottom of its frame that the safe area doesn't report, so the gap clears
-   the larger of the inset and that strip, plus a 12px margin: where it sat over the root's
-   padding before (2026-10-29). */
+   16px over the bottom inset. On touch, just the bottom inset, so the bar sits right on top of
+   the home-indicator area like a native toolbar; 12px where there's no inset (2026-10-29). */
 :root { --dock-gap: calc(16px + var(--root-pb)); }
-@media (pointer: coarse) { :root { --dock-gap: calc(max(var(--root-pb), 34px) + 12px); } }
-@supports (-webkit-touch-callout: none) { :root { --dock-gap: calc(max(var(--root-pb), 34px) + 12px); } }
+@media (pointer: coarse) { :root { --dock-gap: max(var(--root-pb), 12px); } }
+@supports (-webkit-touch-callout: none) { :root { --dock-gap: max(var(--root-pb), 12px); } }
 .dock { position: absolute; left: 0; right: 0; bottom: var(--dock-gap); z-index: 6; padding: 0 44px; pointer-events: none; }
 .dock-in { max-width: 340px; margin: 0 auto; display: grid; gap: 8px; justify-items: center; }
 .dock-row { width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; pointer-events: auto; }
