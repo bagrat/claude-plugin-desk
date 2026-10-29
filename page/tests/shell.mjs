@@ -120,25 +120,37 @@ for (const height of [874, 600]) {
   ok(await s.p.$eval('.stage > .card .vp', (n) => !n.querySelector('*:not(span):not(button)')), 'built of plain text');
   ok(s.errs.length === 0, 'no errors ' + s.errs.join(' ')); await s.ctx.close(); }
 // Inside the platform's skeleton on an iPhone (2026-10-28): the root is padded by the safe area
-// (47 top, 34 bottom here). The shell fits inside that padding: the document doesn't scroll, the
-// header starts under the top padding, the bar sits above the bottom one, and nothing outside the
-// shell shows in another color.
+// (47 top, 34 bottom here). The header starts under the top padding; the cards run on under the
+// bottom one to the viewport's bottom edge (2026-10-29: no empty strip under the list), the bar
+// floats a home-indicator gap above that edge, the document doesn't scroll, and nothing outside
+// the shell shows in another color.
 { const s = await open(b, { db: { tasks: rows }, width: 402, height: 874, insets: { top: 47, bottom: 34 } });
   const g = await s.p.evaluate(() => {
     const r = (q) => document.querySelector(q).getBoundingClientRect(), bg = (n) => getComputedStyle(n).backgroundColor;
-    return { sh: document.scrollingElement.scrollHeight, vh: innerHeight, head: r('header.bar').top, wrap: r('.wrap'), dock: r('.dock-row').bottom,
+    return { sh: document.scrollingElement.scrollHeight, vh: innerHeight, head: r('header.bar').top, wrap: r('.wrap'), scroller: r('.scroller'), dock: r('.dock-row').bottom,
       html: bg(document.documentElement), body: bg(document.body) };
   });
   ok(g.sh === g.vh, `the document is exactly the viewport (${g.sh} = ${g.vh})`);
   ok(g.head === 47, `the header starts under the root's top padding (${g.head})`);
-  ok(g.wrap.top === 47 && g.wrap.bottom === 874 - 34, `the shell fills the root's content box (${g.wrap.top}–${g.wrap.bottom})`);
-  ok(g.dock <= 874 - 34 - 12 && g.dock > 874 - 34 - 120, `the bar sits on screen above the root's bottom padding (${g.dock})`);
+  ok(g.wrap.top === 47 && g.wrap.bottom === 874, `the shell runs from under the top padding to the bottom edge (${g.wrap.top}–${g.wrap.bottom})`);
+  ok(g.scroller.bottom === 874, `the card list reaches the viewport's bottom, no strip under it (${g.scroller.bottom})`);
+  ok(g.dock <= 874 - 34 - 12 && g.dock > 874 - 34 - 120, `the bar sits on screen, clear of the bottom inset (${g.dock})`);
   ok(g.html === g.body, `the root's padding bands are the page's color (${g.html} / ${g.body})`);
   await s.p.mouse.move(200, 400); await s.p.mouse.wheel(0, 3000); await s.p.waitForTimeout(300);
   ok(await s.p.evaluate(() => document.scrollingElement.scrollTop === 0) && (await s.p.$eval('header.bar', (n) => n.getBoundingClientRect().top)) === 47, 'a wheel scrolls the card, not the document');
   await s.p.click('.stage > .card .more > summary'); await s.p.waitForTimeout(100);
   const t = await s.p.textContent('.stage > .card .vp-text');
   ok(/ · root pad 47\/34 · /.test(t), 'the readout shows the root padding: ' + t);
+  // Scrolled to the end, the last of the card clears the bar.
+  await s.p.$eval('.scroller', (n) => { n.scrollTop = n.scrollHeight; }); await s.p.waitForTimeout(200);
+  const [last, barTop] = await s.p.evaluate(() => [document.querySelector('.stage > .card').getBoundingClientRect().bottom, document.querySelector('.dock-row').getBoundingClientRect().top]);
+  ok(last <= barTop, `scrolled to the end, the card ends above the bar (${last} ≤ ${barTop})`);
+  // Other tabs: the list also runs to the bottom edge, and its last row scrolls into full view.
+  await s.p.click('#tab-working'); await s.p.waitForTimeout(200);
+  await s.p.$eval('.scroller', (n) => { n.scrollTop = n.scrollHeight; }); await s.p.waitForTimeout(200);
+  const [sb, lastRow] = await s.p.evaluate(() => { const rows = document.querySelectorAll('#p-working .list > *'); return [document.querySelector('.scroller').getBoundingClientRect().bottom, rows[rows.length - 1].getBoundingClientRect().bottom]; });
+  ok(sb === 874 && lastRow <= 874 - 34, `In progress: the list reaches the bottom edge and its last row clears the inset (${sb}, ${lastRow})`);
+  ok(await s.p.evaluate(() => document.scrollingElement.scrollTop === 0 && document.scrollingElement.scrollHeight === innerHeight), 'and the document still does not scroll');
   // A keyboard (stand-in visual viewport 400px): the shell still ends at its top.
   await s.p.addInitScript(() => {
     const vv = new EventTarget(); Object.assign(vv, { height: innerHeight, width: innerWidth, offsetTop: 0, offsetLeft: 0, scale: 1 });

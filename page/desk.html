@@ -25,18 +25,22 @@
   --chip-bg: #3b4252; --done: #9aa3b2; --new: #e5a27a; --ok: #a3be8c; --raise: #3b4252; color-scheme: dark }
 
 /* The platform wraps the page in a skeleton that pads :root by the top and bottom safe areas;
-   the shell sizes itself to what's inside that padding (height: 100%, never 100vh), and the
-   root shares the page's color so its padding bands don't show. */
+   the shell sizes itself from that (height: 100%, never 100vh), and the root shares the page's
+   color so its padding bands don't show. --root-pb is the root's bottom padding (the script
+   reads the real one; env() until it does). */
+:root { --root-pb: env(safe-area-inset-bottom, 0px); }
 html { box-sizing: border-box; background: var(--bg); }
 html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
 body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--f-ui); }
-/* The shell (2026-10-28): exactly the root's content box (while a keyboard is up, the part of
-   it still showing), the header pinned on top, the answer bar pinned at the bottom, and only
-   the scroller between them moves; the document itself never scrolls. */
-.wrap { position: relative; top: var(--vv-top, 0px); display: flex; flex-direction: column; box-sizing: border-box; height: 100%; max-width: 720px; margin: 0 auto; }
-.wrap.vv { height: var(--vv-h); }
+/* The shell (2026-10-28): from under the root's top padding down through its bottom padding to
+   the screen's edge, so the cards run on under the home indicator like a native list (2026-10-29)
+   and no empty strip shows under them (while a keyboard is up, it ends at the keyboard's top).
+   The header is pinned on top, the answer bar floats at the bottom, and only the scroller
+   between them moves; the document itself never scrolls. */
+.wrap { position: relative; top: var(--vv-top, 0px); display: flex; flex-direction: column; box-sizing: border-box; height: calc(100% + var(--root-pb)); margin: 0 auto calc(-1 * var(--root-pb)); max-width: 720px; }
+.wrap.vv { height: var(--vv-h); margin-bottom: 0; }
 .wrap > header.bar, .scroller { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
-.scroller { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-bottom: 48px; }
+.scroller { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-bottom: calc(48px + var(--root-pb)); }
 a { color: var(--accent); }
 a.bare { overflow-wrap: anywhere; }
 a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
@@ -164,13 +168,14 @@ details.task, .row { scroll-margin-top: 10px; }
 /* One at a time: the answers and the arrows sit in a bar at the bottom, in reach of a thumb,
    so a long item never pushes them off screen. Sized for a 402pt-wide phone (iPhone 17). */
 /* Floating, inset from the sides so the screen's rounded corners never clip a button. */
-/* The gap under the answer bar, above the root's bottom padding (which already clears the
-   reported safe area). On touch screens an app's viewer can hide a home-indicator-sized strip
-   (34px) at the bottom of its frame that the safe area doesn't report, so the gap is a 12px
-   margin plus whatever part of that strip the root's padding doesn't already cover. */
-:root { --dock-gap: 16px; }
-@media (pointer: coarse) { :root { --dock-gap: calc(12px + max(0px, 34px - env(safe-area-inset-bottom, 0px))); } }
-@supports (-webkit-touch-callout: none) { :root { --dock-gap: calc(12px + max(0px, 34px - env(safe-area-inset-bottom, 0px))); } }
+/* The gap under the answer bar, from the screen's bottom edge (the shell reaches it). Off touch,
+   16px over the bottom inset. On touch screens an app's viewer can hide a home-indicator-sized
+   strip (34px) at the bottom of its frame that the safe area doesn't report, so the gap clears
+   the larger of the inset and that strip, plus a 12px margin: where it sat over the root's
+   padding before (2026-10-29). */
+:root { --dock-gap: calc(16px + var(--root-pb)); }
+@media (pointer: coarse) { :root { --dock-gap: calc(max(var(--root-pb), 34px) + 12px); } }
+@supports (-webkit-touch-callout: none) { :root { --dock-gap: calc(max(var(--root-pb), 34px) + 12px); } }
 .dock { position: absolute; left: 0; right: 0; bottom: var(--dock-gap); z-index: 6; padding: 0 44px; pointer-events: none; }
 .dock-in { max-width: 340px; margin: 0 auto; display: grid; gap: 8px; justify-items: center; }
 .dock-row { width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; pointer-events: auto; }
@@ -1138,6 +1143,9 @@ function render(docs) {
   // not innerHeight: a viewer's sheet can keep it shorter and offset with no keyboard
   // (2026-10-28), and then the shell stays the plain viewport height, header at the top.
   const vv = window.visualViewport, shell = document.querySelector(".wrap");
+  // The shell runs on through the root's bottom padding, read as laid out (what the skeleton set).
+  const rootPad = () => document.documentElement.style.setProperty("--root-pb", (parseFloat(getComputedStyle(document.documentElement).paddingBottom) || 0) + "px");
+  rootPad(); addEventListener("resize", rootPad); addEventListener("orientationchange", rootPad);
   if (vv) {
     const typing = () => document.activeElement?.matches("textarea, input") && shell.contains(document.activeElement);
     let base = vv.height, baseTop = vv.offsetTop;
