@@ -134,6 +134,9 @@ for (const height of [874, 600]) {
   ok(g.head === 47, `the header starts under the root's top padding (${g.head})`);
   ok(g.wrap.top === 47 && g.wrap.bottom === 874, `the shell runs from under the top padding to the bottom edge (${g.wrap.top}–${g.wrap.bottom})`);
   ok(g.scroller.bottom === 874, `the card list reaches the viewport's bottom, no strip under it (${g.scroller.bottom})`);
+  // What shows at the bottom edge is the list, not bare root under a clipped shell (getBoundingClientRect ignores clipping).
+  const inList = () => s.p.evaluate(() => [873, 864, 844].map((y) => { const n = document.elementFromPoint(200, y); return n && n.closest('.scroller') ? 'list' : (n ? n.nodeName : 'none'); }));
+  { const h = await inList(); ok(h.every((x) => x === 'list'), `Waiting: the bottom 1, 10 and 30px show the list (${h})`); }
   ok(g.dock <= 874 - 34 - 12 && g.dock > 874 - 34 - 120, `the bar sits on screen, clear of the bottom inset (${g.dock})`);
   ok(g.html === g.body, `the root's padding bands are the page's color (${g.html} / ${g.body})`);
   await s.p.mouse.move(200, 400); await s.p.mouse.wheel(0, 3000); await s.p.waitForTimeout(300);
@@ -150,6 +153,7 @@ for (const height of [874, 600]) {
   await s.p.$eval('.scroller', (n) => { n.scrollTop = n.scrollHeight; }); await s.p.waitForTimeout(200);
   const [sb, lastRow] = await s.p.evaluate(() => { const rows = document.querySelectorAll('#p-working .list > *'); return [document.querySelector('.scroller').getBoundingClientRect().bottom, rows[rows.length - 1].getBoundingClientRect().bottom]; });
   ok(sb === 874 && lastRow <= 874 - 34, `In progress: the list reaches the bottom edge and its last row clears the inset (${sb}, ${lastRow})`);
+  { const h = await inList(); ok(h.every((x) => x === 'list'), `In progress: the bottom 1, 10 and 30px show the list (${h})`); }
   ok(await s.p.evaluate(() => document.scrollingElement.scrollTop === 0 && document.scrollingElement.scrollHeight === innerHeight), 'and the document still does not scroll');
   // A keyboard (stand-in visual viewport 400px): the shell still ends at its top.
   await s.p.addInitScript(() => {

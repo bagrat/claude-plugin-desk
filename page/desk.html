@@ -30,7 +30,10 @@
    reads the real one; env() until it does). */
 :root { --root-pb: env(safe-area-inset-bottom, 0px); }
 html { box-sizing: border-box; background: var(--bg); }
-html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
+html, body { height: 100%; margin: 0; overscroll-behavior: none; }
+/* Only the root clips (it is the viewport's, so at the screen's edge); the body must not, or it
+   cuts the shell off at the root's bottom padding and leaves a bare strip there (2026-10-29). */
+html { overflow: hidden; }
 body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--f-ui); }
 /* The shell (2026-10-28): from under the root's top padding down through its bottom padding to
    the screen's edge, so the cards run on under the home indicator like a native list (2026-10-29)
