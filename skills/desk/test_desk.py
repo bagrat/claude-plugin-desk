@@ -1393,6 +1393,20 @@ class DeskTests(Base):
             text = " ".join((skills / f).read_text().split())
             self.assertIn("publish again until it goes through", text, f)
 
+    def test_core_skill_is_short_and_the_reference_has_the_rest(self):
+        # 4b: what a turn needs stays in SKILL.md; the rest is read on demand from reference.md.
+        here = tasks.PLUGIN_REPO / "skills" / "desk"
+        core, ref = (here / "SKILL.md").read_text(), (here / "reference.md").read_text()
+        self.assertLess(len(core.splitlines()), 120)
+        self.assertIn("reference.md", core)
+        for n in range(1, 18):
+            self.assertRegex(core, rf"(?m)^{n}\. \*\*", f"rule {n} in the core")
+            self.assertRegex(ref, rf"(?m)^{n}\. \*\*", f"rule {n} in the reference")
+        # Every command is documented in the reference.
+        for name in re.findall(r'sub\.add_parser\("([\w-]+)"|cmd\("([\w-]+)", cmd_', (here / "desk.py").read_text()):
+            name = next(x for x in name if x)
+            self.assertIn(f"$S {name}", ref, name)
+
     def test_real_template_renders(self):
         out = self.root / "p.html"
         self.assertEqual(self.run_cli("page", "--out", out)[0], 0)

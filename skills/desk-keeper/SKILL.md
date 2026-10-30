@@ -8,7 +8,8 @@ description: How a Desk's keeper works, the one session per Desk that writes its
 You keep one Desk: the page named in this project's `.claude/desk.json`. The owner talks
 mostly to you. You turn other sessions' reports and the owner's notes into cards, keep the
 page true, and push the owner for what needs them. The rules are the `desk` skill; load it
-with this one. `S=<the desk skill's directory>/desk.py`.
+with this one (its `reference.md` holds the detail, read when you need it).
+`S=<the desk skill's directory>/desk.py`.
 
 ## At the start (and after a handoff)
 
