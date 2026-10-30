@@ -47,7 +47,7 @@ directory; `--desk FILE` (before the command) or `$DESK_CONFIG` names another.
 | Command | What |
 | --- | --- |
 | `python3 $S sessions $R` | The sessions behind open cards, one per line, to check one by one (`get_session`). |
-| `python3 $S prep $R --sessions sessions.json [--message draft.md]` | **Before every message.** The rule-reload check, the checks, the notes to sort, the deck in the page's order, the footer. With `--message`, each numbered question or "Recommended:" line in the draft that no Waiting card holds. Exit 1 when anything is left to do. Refuses rows read more than 2 minutes ago (`--max-age MIN`). |
+| `python3 $S prep $R --sessions sessions.json [--message draft.md] [--ruled FILE]` | **Before every message.** The rule-reload check, the checks, the notes to sort, the deck in the page's order, the footer. With `--message`, each numbered question or "Recommended:" line in the draft that no Waiting card holds, and each one already answered (a card's answer or "Settled so far") or ruled (a line in `--ruled` or desk.json's `rulings` files). Exit 1 when anything is left to do. Refuses rows read more than 2 minutes ago (`--max-age MIN`). |
 | `python3 $S apply $R plan.json` | **The turn's writes in one call**: `{"moves": [{id, to, ask?, recommend?, …}], "deps": [{id, item, state}], "images": [{id, top\|fold, images}], "rank": [{id, place}], "pushed": [id], "sorted": [note-id]}`. Prints `{"writes", "delete_assets"}`: send `writes` as one ArtifactData `batch`. Each row is written once, pinned to its read; a refused step writes nothing. |
 | `python3 $S loaded` | Mark the rules reloaded, after you've re-read what `prep` or `update` named. |
 | `python3 $S update` | `/desk:update`: pull the plugin's clone at `~/.claude/desk` (clone it if missing) and name what changed since you loaded it. Exit 1 when there's something to re-read. |
@@ -174,6 +174,10 @@ it.
    card (`images`).
 5. **Answers.** When a card comes back with a new question, the old answer leaves it, and
    what's settled goes in a "Settled so far" fold at the top (`move … waiting --settled`).
+   **Never ask twice** (2026-10-30): `prep --message` flags a question in the draft the owner
+   already answered (a card's answer or its "Settled so far" fold) or ruled on (a line in a
+   rulings file: desk.json's `"rulings": ["path from the project's root", …]`, or `--ruled`).
+   Act on the ruling instead.
 6. **Order.** News has its own tab, first. In Waiting: the card being discussed, for 3 hours
    after it was last discussed (`--active`), latest first; then by your priority (rule 7). Snoozed cards wait
    under Later, and so do held ones (rule 10), marked "review when you ask".

@@ -60,7 +60,8 @@ Each in full, with its date, in `reference.md`.
 4. **Images** go on the card in the same turn, uploaded to the page's assets, looked at first,
    beside their fold's text. A session with an image sends the keeper its asset id.
 5. **Answers.** A card back with a new question drops the old answer; what's settled goes in a
-   "Settled so far" fold.
+   "Settled so far" fold. Never ask what's answered or ruled: `prep --message` flags it (desk.json's
+   `rulings` files too).
 6. **Order.** News first. Waiting: the card under discussion (3 h), then your priority.
 7. **Priority is yours**: `rank` each new waiting card the turn it lands.
 8. **The footer**: every message ends with a rule and the line `prep` printed, as is.

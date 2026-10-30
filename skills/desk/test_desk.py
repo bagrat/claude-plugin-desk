@@ -364,6 +364,37 @@ class Checks(Base):
         self.assertEqual(code, 0, out)
         self.assertIn("check: ok", out)
 
+    def test_prep_message_flags_questions_already_answered_or_ruled(self):
+        # Review §9: the prep check, in code: never ask what's settled.
+        self.put("a", waiting(ask="Which font for the headings?", recommend="The serif.",
+                              details=[{"title": "Settled so far", "text": "The body text stays in the sans font. Margins are fixed."}]))
+        self.put("b", working(ask="Ship the beta on Friday?", answer="Yes, ship it Friday."))
+        ruled = self.root / "rulings.md"
+        ruled.write_text("- Releases always go out with release notes drafted first.\n")
+        draft = self.root / "draft.md"
+        draft.write_text("1. Should the body text stay in the sans font?\n"
+                         "2. Ship the beta on Friday?\n"
+                         "3. Are release notes drafted first for releases?\n"
+                         "4. Which font for the headings?\n")
+        code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-rules", "--message", draft, "--ruled", ruled)
+        self.assertEqual(code, 1)
+        self.assertIn("already answered or ruled (a's Settled so far)", out)
+        self.assertIn("already answered or ruled (b's answer)", out)
+        self.assertIn("already answered or ruled (rulings.md:1)", out)
+        self.assertNotIn("headings?” is already", out)
+        self.assertEqual(out.count("on no Waiting card"), 0)
+
+    def test_rulings_named_in_desk_json(self):
+        (self.root / "notes").mkdir()
+        (self.root / "notes" / "rulings.md").write_text("Reviews wait until the owner asks for them.\n")
+        (self.root / ".claude").mkdir()
+        cfg = self.root / ".claude" / "desk.json"
+        cfg.write_text(json.dumps({"title": "T", "page": PAGE, "rulings": ["notes/rulings.md"]}))
+        tasks.load_config(cfg)
+        self.assertEqual([f.name for f in tasks.rulings_files()], ["rulings.md"])
+        found = tasks.settled_asks("1. Should reviews wait until the owner asks for them?", [], tasks.rulings_files())
+        self.assertEqual([w for _, w in found], ["rulings.md:1"])
+
     def test_same_handle_twice(self):
         self.put("a", waiting(handle="Price box"))
         self.put("b", working(handle="price box"))

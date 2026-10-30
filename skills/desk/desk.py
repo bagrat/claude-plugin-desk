@@ -562,6 +562,44 @@ def unheld_asks(text, rows):
     return out
 
 
+def sentences(text):
+    return [x.strip() for x in re.split(r"(?<=[.!?])\s+|\n+", str(text or "")) if x.strip()]
+
+
+def rulings_files(given=None):
+    """The files that hold the owner's rulings: --ruled, and desk.json's "rulings" (paths from the
+    project's root, where .claude/ sits)."""
+    out = [Path(g) for g in given or []]
+    if CONFIG_PATH:
+        base = CONFIG_PATH.parent.parent
+        out += [base / f for f in CONFIG.get("rulings") or []]
+    return [f for f in out if f.is_file()]
+
+
+def settled_asks(text, rows, files=()):
+    """Review §9: each question in the draft the owner already answered (a card's answer or its
+    "Settled so far" fold) or ruled on (a line in a rulings file). Each (question, where)."""
+    known = []
+    for r in rows:
+        if r.get("answer"):
+            known.append((f"{r.id}'s answer", f"{r.get('ask') or ''} {r.get('answer')}"))
+        for f in r.get("details") or []:
+            if f.get("title") == "Settled so far":
+                known += [(f"{r.id}'s Settled so far", x) for x in sentences(f.get("text"))]
+    for f in files:
+        for i, line in enumerate(Path(f).read_text().splitlines(), 1):
+            if line.strip():
+                known.append((f"{f.name}:{i}", line))
+    known = [(where, words(t)) for where, t in known]
+    out = []
+    for q in message_asks(text):
+        w = words(q)
+        hit = next((where for where, k in known if w and len(w & k) / len(w) >= 0.6), None)
+        if hit:
+            out.append((q, hit))
+    return out
+
+
 def dep_state_of(card):
     """What an item linked to this card should read: done once the card is gone."""
     return "done" if card is None else DEP_OF_STATE.get(card.get("state"), "open")
@@ -1873,9 +1911,15 @@ def cmd_prep(a):
               file=sys.stderr)
     code = cmd_check(a)
     if a.message:
-        for q in unheld_asks(Path(a.message).read_text(), load_rows(a.rows)):
-            print(f"message: “{short(q)}” is on no Waiting card: put it on its card's ask (rule 1)")
+        draft, rows = Path(a.message).read_text(), load_rows(a.rows)
+        settled_qs = settled_asks(draft, rows, rulings_files(a.ruled))
+        for q, where in settled_qs:
+            print(f"message: “{short(q)}” is already answered or ruled ({where}): act on it, don't ask again (rule 5)")
             code = 1
+        for q in unheld_asks(draft, rows):
+            if q not in {x for x, _ in settled_qs}:
+                print(f"message: “{short(q)}” is on no Waiting card: put it on its card's ask (rule 1)")
+                code = 1
     notes = load_inbox(a.rows)
     for n in notes:
         print(f"inbox {n.id}: sort this note into a card, then `sorted` (rule 15): {short(n.get('text'))}")
@@ -1965,6 +2009,8 @@ def main(argv=None):
             s.add_argument("--max-age", type=float, default=READ_MINUTES,
                            help=f"refuse rows read longer ago than this, in minutes (default {READ_MINUTES})")
             s.add_argument("--message", help="the draft about to go out: flag its questions no Waiting card holds")
+            s.add_argument("--ruled", action="append",
+                           help="a file of the owner's rulings, one per line (also desk.json's rulings)")
             s.add_argument("--full", action="store_true",
                            help="describe every row, not only those changed since the last prep")
     s = cmd("footer", cmd_footer, "the footer line")
