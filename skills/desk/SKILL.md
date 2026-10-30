@@ -55,6 +55,7 @@ Each in full, with its date, in `reference.md`.
 3. **A card holds everything**: ask and recommendation, then context, then folds. The owner
    decides from the card alone (a review: problem, fix, verdict, findings; a decision: the
    request in full, options, trade-offs; a check: what to try and what right looks like).
+   A row past 8 KB is flagged: trim it.
 4. **Images** go on the card in the same turn, uploaded to the page's assets, looked at first,
    beside their fold's text. A session with an image sends the keeper its asset id.
 5. **Answers.** A card back with a new question drops the old answer; what's settled goes in a
@@ -62,7 +63,7 @@ Each in full, with its date, in `reference.md`.
 6. **Order.** News first. Waiting: the card under discussion (3 h), then your priority.
 7. **Priority is yours**: `rank` each new waiting card the turn it lands.
 8. **The footer**: every message ends with a rule and the line `prep` printed, as is.
-9. **Finished tasks**: news with a recap, a `check` card for
+9. **Finished tasks** close at the end of their step, that turn: news with a recap, a `check` card for
    what to try by hand, or deleted. No Done list.
 10. **The buttons.** 👍 go with the recommended, ⏭ tomorrow 9:00, 💬 the chat; a `step` (done
     off the page) has its link as the main button and 👍 reads Done. Held cards wait under

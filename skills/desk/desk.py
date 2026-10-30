@@ -51,6 +51,7 @@ NEWS_DROPS = ("ask", "recommend", "ifNone") + ANSWER_FIELDS + ("workingSince", "
                                                               "rank", "rankByHand", "blocks", "kind", "note")
 # Rule 3: a waiting card thinner than this, with no folds, is flagged for its context.
 THIN_CONTEXT = 300
+ROW_BYTES = 8 * 1024  # 4c: a row past this is flagged
 ACTIVE_HOURS = 3
 # Rule 13: when the keeper last pushed the owner about a waiting card.
 PUSHED = "pushedAt"
@@ -394,6 +395,10 @@ def settled(text, m):
                 or (before.rstrip().endswith("(") and STAMP.match(after)))
 
 
+def row_bytes(r):
+    return len(json.dumps(r.data, ensure_ascii=False).encode())
+
+
 def check(rows, now, sessions=None, stale_hours=12):
     """Problems, each (row id, message). Rules 1-5, 9, 12, 13 and 14."""
     out = []
@@ -453,7 +458,10 @@ def check(rows, now, sessions=None, stale_hours=12):
                 if any(b == "blocked" for b in buckets.values()):
                     blocked = [s for s, b in buckets.items() if b == "blocked"]
                     say(r, f"session blocked: {', '.join(blocked)}: push the owner with what to approve")
-                if buckets and not unseen and not any(b == "working" for b in buckets.values()):
+                if buckets and not unseen and all(b == "completed" for b in buckets.values()):
+                    say(r, f"its step is over (every session completed): close it this turn: news with a recap, "
+                           f"a check card for what to try by hand, or done; or waiting if the owner is next (rule 9)")
+                elif buckets and not unseen and not any(b == "working" for b in buckets.values()):
                     shown = ", ".join(f"{s} {b}" for s, b in buckets.items())
                     say(r, f"working but no session is ({shown}): waiting if the owner is next, Later (scheduled, with when) if it's held for a release or a date, or close it; still working only while a session waits on its own CI (rule 1)")
             last = max([t for t in (parse_time(r.get("workingSince")), parse_time(r.get("updatedAt"))) if t], default=None)
@@ -481,6 +489,13 @@ def check(rows, now, sessions=None, stale_hours=12):
             out.extend((r.id, m) for m in image_files_problems(r))
             if st != "news":
                 out.extend((r.id, m) for m in deps_problems(r, rows))
+
+    # A row past 8 KB is slow to read and write each turn (4c).
+    for r in rows:
+        size = row_bytes(r)
+        if size > ROW_BYTES:
+            say(r, f"row is {size / 1024:.1f} KB, past {ROW_BYTES // 1024} KB: trim it: summarize settled folds, "
+                   "drop superseded ones and their images, close what's finished (rule 3)")
 
     # A card's number is its place now (rule 1); a stored one is left over from 0.2.9.
     for r in rows:
@@ -814,6 +829,9 @@ def write_patch(rows_d, row, patch, if_version, out_dir=None):
     row.version = None
     row.save()
     spend_version(row)
+    if row_bytes(row) > ROW_BYTES:
+        print(f"warning: {row.id} is {row_bytes(row) / 1024:.1f} KB after this write, past {ROW_BYTES // 1024} KB: trim it (rule 3)",
+              file=sys.stderr)
     entry = {"op": "update", "collection": COLLECTION, "doc_id": row.id, "file_path": str(pf.resolve())}
     if version is not None:
         entry["if_version"] = version

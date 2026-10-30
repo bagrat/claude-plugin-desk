@@ -158,6 +158,9 @@ it.
    - a **check**: what to try, where, and what right and wrong look like.
    Bare `https://` links in the context, folds, ask and recommendation show as links. `check`
    flags a waiting card (not a `step`) whose context is under 300 characters with no folds.
+   **Small rows** (2026-10-30): a row past 8 KB is slow to read and write every turn; `check`
+   flags it and every write that takes a row past it warns. Trim it: summarize settled folds,
+   drop superseded ones and their images, close what's finished.
 4. **Images, with folds.** New images go on the card in the same turn, uploaded to the page's
    asset store (Artifact publish, `asset: true`, the page's url), superseded ones replaced and
    deleted. A link alone isn't enough. A card split into folds carries each fold's images beside
@@ -181,7 +184,8 @@ it.
 8. **The footer.** Every message to the owner ends with a horizontal rule, then one link:
    `[✦ K ··· ● N ··· ◌ M](<page>#news)`, K news, N waiting minus snoozed, M working, counted from
    the rows read fresh (`footer`), never from memory. Without news: `[● N ··· ◌ M](<page>#waiting)`.
-9. **Finished tasks.** No Done list. A finished task with something to tell becomes news with
+9. **Finished tasks.** A card closes at the end of its step (2026-10-30): the turn its work is
+   done (every session behind it completed, `check` flags it), not later. No Done list. A finished task with something to tell becomes news with
    its recap (`move … news --context …`). Anything to try by hand stays a Waiting card (kind
    `check`). Otherwise the card closes on their answer (`move … done`).
 10. **The buttons.** On a Waiting card: 👍 go with the recommended (to In progress), ⏭ back

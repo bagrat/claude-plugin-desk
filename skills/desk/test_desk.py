@@ -262,6 +262,24 @@ class Checks(Base):
         self.assertTrue(any("no session is" in x for x in m))
         self.assertEqual(self.msgs("a", {"session_01AAAA": "completed", "session_01BBBB": "working"}), [])
 
+    def test_card_closes_at_the_end_of_its_step(self):
+        # 4c: every session behind it completed: the step is over, the card closes this turn.
+        self.put("a", working())
+        msgs = [m for _, m in self.problems({"session_01AAAA": "completed"})]
+        self.assertTrue(any("step is over" in m for m in msgs), msgs)
+        msgs = [m for _, m in self.problems({"session_01AAAA": "idle"})]
+        self.assertFalse(any("step is over" in m for m in msgs), msgs)
+        self.assertTrue(any("working but no session is" in m for m in msgs), msgs)
+
+    def test_a_row_past_8_kb_is_flagged_and_warned_on_write(self):
+        self.put("a", waiting(details=[{"title": "Long", "text": "x" * 9000}]))
+        self.assertTrue(any("past 8 KB" in m for _, m in self.problems()))
+        self.put("b", working(context="y" * 8000))
+        self.assertFalse(any(rid == "b" and "KB" in m for rid, m in self.problems()))
+        code, out, err = self.run_cli("move", self.dir, "b", "working", "--now", NOW, "--note", "z" * 500)
+        self.assertEqual(code, 0, err)
+        self.assertIn("past 8 KB", err)
+
     def test_working_session_not_checked_or_blocked(self):
         self.put("a", working())
         self.assertTrue(any("not checked" in m for m in self.msgs("a", {})))
