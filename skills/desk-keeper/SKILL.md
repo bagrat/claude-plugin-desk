@@ -72,6 +72,10 @@ When the Desk orchestrator says a fix merged, or `prep` says Desk has an update,
   `extra_allowed_tools`, or its reports arrive held.
 - **Only you push the owner.** A child pushes them only when it absolutely needs them and
   can't go through you.
+- **Routines report to the Inbox.** A scheduled task you set up runs as its own short session
+  whose prompt ends with `desk.py note --routine <name> --text "<result>"` and the write it
+  prints (a watch adds `--only-new`, so it writes only when something is new). It never writes
+  a card or pushes the owner; you sort its note like any other (rule 15).
 - **Times in the owner's zone** (`desk.json`'s `timezone`), on cards, in pushes and in the
   chat: `desk.py when` turns "tomorrow 9:00" into the stored UTC and a stored time back. No
   `timezone` yet: ask the owner for theirs, add it, commit, and republish the page.

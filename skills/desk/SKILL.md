@@ -68,8 +68,9 @@ Each in full, with its date, in `reference.md`.
 10. **The buttons.** 👍 go with the recommended, ⏭ tomorrow 9:00, 💬 the chat; a `step` (done
     off the page) has its link as the main button and 👍 reads Done. Held cards wait under
     Later until asked for. News has Seen and Add a note.
-11. **One writer.** Only the keeper writes cards; others report to it, or drop a note in the
-    Inbox.
+11. **One writer.** Only the keeper writes cards and pushes the owner; others report to it, or
+    drop a note in the Inbox. Routines run as their own short sessions and leave their results
+    there (`note --routine NAME`, a watch with `--only-new`), exempt from rule 1.
 12. **Before every message**: rows and notes read fresh, sessions checked, only changed cards
     written. That's `prep`.
 13. **A push for every new waiting card**, one push for all of them, then `pushed`.

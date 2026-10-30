@@ -62,6 +62,7 @@ directory; `--desk FILE` (before the command) or `$DESK_CONFIG` names another.
 | `python3 $S inbox $R` | The notes waiting to be sorted (rule 15). |
 | `python3 $S sorted $R <note-id> […]` | The deletes for notes now held by cards. |
 | `python3 $S note --text "…" --from <where> --out DIR [--image ID=caption]` | A note for this Desk's Inbox (what `/desk:note` runs). |
+| `python3 $S note --routine NAME [--only-new] --text "…" --out DIR` | A routine's result for the Inbox (rule 11); with `--only-new`, a watch: no note when the text is what it last reported, or empty. |
 | `python3 $S look [--theme T] [--emoji E \| --image ASSET \| --letter L] [--current row.json] [--list]` | The `settings/look` row (rule 16). |
 | `python3 $S when "tomorrow 9:00"\|"today 17:30"\|"2026-11-02 9:00"\|ISO` | A time in the owner's zone: their words to the UTC ISO a row stores (`snoozeUntil`, `when`), or a stored ISO as they read it. |
 | `python3 $S backup $R --out FILE [--private-repo]` | Before a handoff: the cards, notes and look as read, in one JSON file with a timestamp. Refuses a file inside a git repo (a project's repo may be public) unless `--private-repo`. |
@@ -205,6 +206,13 @@ it.
     `check` flags it until you give it one or move it on (waiting, held, news, or delete it).
 11. **One writer.** Only the keeper writes cards; other sessions report to it. The one write
     anyone else makes is a note into the Inbox (rule 15); an image comes as an asset id (rule 4).
+    **Routines** (2026-10-30): a scheduled task runs as its own short session and leaves its
+    result in the Inbox (`note --routine NAME`), never a card and never a push: only the keeper
+    writes cards and pushes the owner, when it sorts the note. A routine's result is exempt
+    from rule 1: it puts no question to the owner until the keeper makes it a card. A **watch**
+    (a routine that checks for change) writes only when something is new
+    (`note --routine NAME --only-new`, which keeps what it last reported under
+    `~/.cache/desk/routines`, never in git; nothing new: no note, no wake).
 12. **Before every message.** Rows and notes read fresh, only the sessions behind cards checked,
     only changed cards written, by small edits. That's `prep`. Fresh means for this message, a
     one-line one too: the owner's Seen deletes rows meanwhile. `prep` and `footer` refuse a dump

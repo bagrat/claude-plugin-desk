@@ -1353,7 +1353,7 @@ def short(text, n=90):
 def cmd_inbox(a):
     notes = load_inbox(a.rows)
     for n in notes:
-        bits = [n.get("at") or "?", n.get("from") or "?"]
+        bits = [n.get("at") or "?", f"routine {n.get('routine')}" if n.get("routine") else n.get("from") or "?"]
         if n.get("images"):
             bits.append(f"{len(n.get('images'))} image(s)")
         if n.get("sendErr"):
@@ -1379,20 +1379,56 @@ def cmd_sorted(a):
     return 0
 
 
+ROUTINES = Path(os.environ.get("DESK_ROUTINES") or Path.home() / ".cache" / "desk" / "routines")
+
+
+def routine_state(name):
+    """Where a watch keeps what it last reported: per Desk, outside any repo (4d)."""
+    d = ROUTINES / hashlib.sha1((PAGE or "").encode()).hexdigest()[:10]
+    return d / (re.sub(r"[^\w.-]+", "-", name) + ".json")
+
+
 def cmd_note(a):
-    """A raw note for the Inbox, from any session on the Desk's account (/desk:note)."""
+    """A raw note for the Inbox, from any session on the Desk's account (/desk:note), or a
+    routine's result (--routine): routines never write cards; the keeper sorts their notes."""
     if not PAGE:
         sys.exit("no Desk configured here: no .claude/desk.json (pass --desk, or run /desk:setup)")
     text = a.text if a.text is not None else sys.stdin.read()
     if not text.strip():
+        if a.routine:
+            print(json.dumps({"page": PAGE, "nothing_new": True, "routine": a.routine}, indent=2))
+            return 0
         sys.exit("an empty note")
+    if a.only_new and not a.routine:
+        sys.exit("--only-new is for a routine's watch: give --routine NAME")
     now = now_arg(a.now)
+    state, seen = None, None
+    if a.only_new:
+        state = routine_state(a.routine)
+        if git_root(next(p for p in state.parents if p.exists())):
+            sys.exit(f"{state} is inside a git repo: a watch's state stays out of git (set DESK_ROUTINES)")
+        try:
+            seen = json.loads(state.read_text()).get("digest")
+        except (OSError, ValueError):
+            seen = None
+        if seen == hashlib.sha1(text.strip().encode()).hexdigest():
+            print(json.dumps({"page": PAGE, "nothing_new": True, "routine": a.routine}, indent=2))
+            return 0
     nid = note_id(text, now)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     f = out / f"{nid}.json"
-    f.write_text(json.dumps(new_note(text, a.origin, now, parse_images(a.image, a.json) if (a.image or a.json) else None),
-                            ensure_ascii=False, indent=2) + "\n")
+    row = new_note(text, a.origin or (f"routine:{a.routine}" if a.routine else None), now,
+                   parse_images(a.image, a.json) if (a.image or a.json) else None)
+    if not row["from"]:
+        sys.exit("say where the note is from: --from (a session link, a repo, 'chat') or --routine NAME")
+    if a.routine:
+        row["routine"] = a.routine
+    f.write_text(json.dumps(row, ensure_ascii=False, indent=2) + "\n")
+    if state:
+        # What this watch last reported, so the next run writes only what's new.
+        state.parent.mkdir(parents=True, exist_ok=True)
+        state.write_text(json.dumps({"digest": hashlib.sha1(text.strip().encode()).hexdigest(), "at": iso(now)}) + "\n")
     print(json.dumps({"page": PAGE, "keeper": CONFIG.get("keeper"), "write": entry_for(INBOX, nid, f)}, indent=2))
     return 0
 
@@ -1894,7 +1930,10 @@ def main(argv=None):
 
     s = sub.add_parser("note", help="a note for this Desk's Inbox; writes the row file, prints the write")
     s.add_argument("--text", help="the note (default: read from stdin)")
-    s.add_argument("--from", dest="origin", required=True, help="where it came from: a session link, a repo, 'chat'")
+    s.add_argument("--from", dest="origin", help="where it came from: a session link, a repo, 'chat'")
+    s.add_argument("--routine", help="a routine's result: its name (from defaults to routine:NAME); an empty text is nothing new")
+    s.add_argument("--only-new", action="store_true",
+                   help="a watch: write only when the text differs from what this routine last reported (state kept outside git)")
     s.add_argument("--image", action="append", help="ID=caption: an image already uploaded to the page")
     s.add_argument("--json", help="a JSON list of {id, caption}")
     s.add_argument("--out", required=True, help="the directory for the row file")

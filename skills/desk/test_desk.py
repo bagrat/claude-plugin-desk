@@ -1285,6 +1285,38 @@ class DeskTests(Base):
         row = json.loads(Path(w["file_path"]).read_text())
         self.assertEqual(row, {"text": "The swipe skips a card", "from": "chat", "at": NOW})
 
+    def test_a_routine_leaves_its_result_in_the_inbox_and_a_watch_only_what_is_new(self):
+        # 4d: routines never write cards; their results are notes for the keeper to sort.
+        self.addCleanup(setattr, tasks, "ROUTINES", tasks.ROUTINES)
+        tasks.ROUTINES = self.root / "routines"
+        out = self.root / "note"
+        code, o, err = self.run_cli("note", "--routine", "nightly", "--text", "2 new failures", "--out", out, "--now", NOW)
+        self.assertEqual(code, 0, err)
+        w = json.loads(o)["write"]
+        row = json.loads(Path(w["file_path"]).read_text())
+        self.assertEqual((row["from"], row["routine"]), ("routine:nightly", "nightly"))
+        # A watch: the same text again writes nothing; new text does.
+        for text, new in (("PR 3 merged", True), ("PR 3 merged", False), ("PR 4 merged", True)):
+            code, o, err = self.run_cli("note", "--routine", "prs", "--only-new", "--text", text, "--out", out, "--now", NOW)
+            self.assertEqual(code, 0, err)
+            self.assertEqual("write" in json.loads(o), new, text)
+        code, o, _ = self.run_cli("note", "--routine", "prs", "--only-new", "--text", "", "--out", out)
+        self.assertTrue(json.loads(o)["nothing_new"])
+        self.assertTrue(any((self.root / "routines").rglob("prs.json")))
+        # Its state stays out of git.
+        repo = self.root / "repo"
+        repo.mkdir()
+        sh(repo, "init", "-q")
+        tasks.ROUTINES = repo / "state"
+        with self.assertRaises(SystemExit):
+            self.run_cli("note", "--routine", "prs", "--only-new", "--text", "x", "--out", out)
+
+    def test_inbox_names_a_routines_note(self):
+        (self.note_dir() / "n-1.json").write_text(json.dumps(
+            {"text": "3 stale branches", "from": "routine:sweep", "routine": "sweep", "at": NOW}))
+        code, out, _ = self.run_cli("inbox", self.dir)
+        self.assertIn("routine sweep", out)
+
     def test_prep_stops_on_unsorted_notes_and_sorted_clears_them(self):
         self.put("a", waiting())
         (self.note_dir() / "n-1.json").write_text(json.dumps({"text": "fix the dashes", "from": "page", "at": NOW}))
