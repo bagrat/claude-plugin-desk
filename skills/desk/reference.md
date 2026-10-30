@@ -209,6 +209,15 @@ it.
     note** (2026-10-27): a note sent from a news card is an answer like any other, so it wakes
     you and moves the row to `working`, out of News and into In progress. It has no session yet, so
     `check` flags it until you give it one or move it on (waiting, held, news, or delete it).
+    **Answers per question** (2026-10-30): an ask that numbers its questions (`1. … 2. …`, one
+    per line, or `(1) … (2) …`) gets a Yes / No per question on the card, and "All as
+    recommended" when it has a recommendation. Picks wait in a tray at the top of Waiting, with
+    a box to dictate answers to any cards in words; **Send together** saves each card's answer
+    (`1: yes. 2: no.`, or "All as recommended: …") on its row, moving it to In progress, saves
+    the dictated words as an Inbox note (`from: "waiting"`), and wakes you once:
+    `[Desk] N answers, sent together:` with one line per card (`(task <id>)`) and the note
+    (`(inbox <id>)`). Handle them all in that one turn; split the dictated note across the cards
+    it speaks to (rule 15). So put several questions on one card as a numbered list.
 11. **One writer.** Only the keeper writes cards; other sessions report to it. The one write
     anyone else makes is a note into the Inbox (rule 15); an image comes as an asset id (rule 4).
     **Routines** (2026-10-30): a scheduled task runs as its own short session and leaves its

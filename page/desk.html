@@ -221,6 +221,25 @@ body:has(#p-waiting:not([hidden]) .dock) .toast { bottom: calc(var(--dock-gap) +
 .kbd { font: 500 12px var(--f-mono); opacity: .75; }
 @media (hover: none) { .kbd { display: none; } }
 .sent { font-size: 13px; color: var(--quiet); }
+/* Answers per question (2026-10-30): a Yes / No per numbered question, and the tray in Waiting
+   that holds picked and dictated answers until they're sent together. */
+.qas { display: grid; gap: 6px; }
+.qa { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 14px; }
+.qa .qn { font: 600 13px var(--f-mono); color: var(--quiet); }
+.qa .qq { color: var(--muted); overflow-wrap: anywhere; }
+.yn { display: inline-flex; gap: 6px; }
+.yn button, .allrec { min-height: 36px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--edge); background: var(--card); color: var(--fg); font: 600 14px var(--f-ui); cursor: pointer; }
+.yn button[aria-pressed=true] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.allrec { justify-self: start; }
+.allrec[aria-pressed=true] { border-color: var(--ok); color: var(--ok); }
+.tray { border: 1px solid var(--edge); border-radius: 12px; background: var(--chip-bg); margin: 0 0 10px; font-size: 14px; }
+.tray > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 12px; color: var(--muted); font-weight: 600; }
+.tray > summary::-webkit-details-marker { display: none; }
+.tray > summary svg.i { width: 16px; height: 16px; color: var(--accent); }
+.tray .tray-in { display: grid; gap: 8px; padding: 0 12px 12px; }
+.tray textarea { box-sizing: border-box; width: 100%; min-height: 76px; resize: vertical; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--edge); background: var(--card); color: var(--fg); font: 15px/1.45 var(--f-ui); }
+.tray ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; color: var(--muted); }
+.tray-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
 .row { background: var(--card); border: 1px solid var(--edge); border-radius: 12px; padding: 12px 16px; display: grid; gap: 4px; min-width: 0; }
 .row .r-title { font-weight: 600; }
@@ -259,6 +278,14 @@ footer { margin-top: 28px; font-size: 13px; color: var(--quiet); max-width: 65ch
   </section>
   <section id="p-waiting" role="tabpanel" aria-labelledby="tab-waiting">
     <div class="count" id="count">Loading the list…</div>
+    <details class="tray" id="tray" hidden>
+      <summary id="tray-sum"></summary>
+      <div class="tray-in">
+        <ul id="tray-l"></ul>
+        <textarea id="tray-text" placeholder="Dictate your answers to any of these cards; the keeper splits them…" aria-label="Your answers, in your words"></textarea>
+        <div class="tray-bar"><button type="button" class="btn primary" id="tray-send">Send together</button><span class="sent" id="tray-st"></span></div>
+      </div>
+    </details>
     <div id="l-waiting"></div>
   </section>
   <section id="p-working" role="tabpanel" aria-labelledby="tab-working" hidden>
@@ -574,6 +601,106 @@ function answerBox(id, t, what = "answer") {
   return box;
 }
 
+// Answers per question (2026-10-30). A card whose ask numbers its questions ("1. …", "(2) …")
+// gets a Yes / No for each and "All as recommended". Picks, and anything dictated in the box
+// at the top of Waiting, wait in the tray (kept in this browser) until Send together: each
+// card's answer is saved on its row, the dictated words as an Inbox note, and the keeper is
+// woken once for all of them.
+const QLINE = /^\s*(?:(\d+)[.)]|\((\d+)\))\s+(.+)$/;
+function questions(ask) {
+  const qs = String(ask || "").split("\n").flatMap((l) => l.split(/(?=\(\d+\)\s)/)).map((l) => l.match(QLINE)).filter(Boolean)
+    .map((m) => ({ n: m[1] || m[2], q: m[3].trim() }));
+  return qs.length >= 2 ? qs : [];
+}
+const tray = Object.assign({ cards: {}, text: "" }, store.get("tray", {}));
+const keepTray = () => store.set("tray", tray);
+// A card's answer once every question is picked, or all as recommended; else null.
+function trayAnswer(id) {
+  const t = ui.rows[id], c = tray.cards[id];
+  if (!t || !c) return null;
+  if (c.all) return "All as recommended" + (t.recommend ? ": " + t.recommend : ".");
+  const qs = questions(t.ask);
+  return qs.length && qs.every((q) => c.picks?.[q.n]) ? qs.map((q) => q.n + ": " + c.picks[q.n]).join(". ") + "." : null;
+}
+function pickRow(id, t) {
+  const qs = questions(t.ask);
+  if (!qs.length) return null;
+  const box = el("div", "qas"), c = () => (tray.cards[id] ||= { picks: {} });
+  const all = btn("allrec", "All as recommended");
+  const sync = () => {
+    const cur = tray.cards[id] || { picks: {} };
+    all.setAttribute("aria-pressed", String(!!cur.all));
+    for (const b of box.querySelectorAll(".yn button")) b.setAttribute("aria-pressed", String(!cur.all && cur.picks?.[b.dataset.n] === b.dataset.v));
+  };
+  const set = (f) => { f(c()); const cur = tray.cards[id]; if (!cur.all && !Object.keys(cur.picks || {}).length) delete tray.cards[id]; keepTray(); sync(); drawTray(); };
+  for (const q of qs) {
+    const r = el("div", "qa"), yn = el("span", "yn");
+    for (const v of ["yes", "no"]) {
+      const b = btn(null, v === "yes" ? "Yes" : "No"); b.dataset.n = q.n; b.dataset.v = v;
+      b.setAttribute("aria-label", q.n + ": " + v);
+      b.onclick = () => set((x) => { x.all = false; x.picks ||= {}; if (x.picks[q.n] === v) delete x.picks[q.n]; else x.picks[q.n] = v; });
+      yn.append(b);
+    }
+    r.append(el("span", "qn", q.n), inline(el("span", "qq"), q.q), yn);
+    box.append(r);
+  }
+  if (t.recommend) { all.onclick = () => set((x) => { x.all = !x.all; }); box.append(all); }
+  sync();
+  return field("Your answers", box);
+}
+function drawTray() {
+  const box = $("tray");
+  if (!box || !(db && isOwner)) return;
+  for (const id of Object.keys(tray.cards)) if (ui.rows[id] && ui.rows[id].state !== "waiting") delete tray.cards[id];
+  const ready = Object.keys(tray.cards).filter((id) => trayAnswer(id)), text = $("tray-text").value.trim();
+  const n = ready.length + (text ? 1 : 0);
+  box.hidden = false;
+  $("tray-sum").replaceChildren(icon("mic"), n ? n + (n > 1 ? " answers" : " answer") + " ready to send" : "Answer by voice, or pick per question");
+  $("tray-l").replaceChildren(...ready.map((id) => el("li", null, nameOf(id, ui.rows[id]) + ": " + trayAnswer(id))));
+  $("tray-send").disabled = !n;
+}
+function setupTray() {
+  const ta = $("tray-text"), send = $("tray-send");
+  ta.value = tray.text || "";
+  ta.addEventListener("input", () => { tray.text = ta.value; keepTray(); drawTray(); });
+  composer(ta, send);
+  send.onclick = sendTray;
+  drawTray();
+}
+async function sendTray() {
+  const send = $("tray-send"), st = (m) => { $("tray-st").textContent = m; };
+  const ids = Object.keys(tray.cards).filter((id) => trayAnswer(id)), raw = $("tray-text").value, text = raw.trim();
+  if ((!ids.length && !text) || send.disabled) return;
+  send.disabled = true; st("Saving…");
+  // Read in the tap: where the comment anchors.
+  const anchor = cm ? cm.anchorFor($("p-waiting")) : null;
+  const at = new Date().toISOString(), lines = [], saved = [];
+  for (const id of ids) {
+    const t = ui.rows[id], a = trayAnswer(id);
+    try { await db.collection("tasks").doc(id).update({ state: "working", workingSince: at, answer: a, answeredAt: at, quick: "text", quickAt: at, answerSent: false }); }
+    catch { continue; }
+    saved.push(id); lines.push("- " + nameOf(id, t) + " (task " + id + "): " + a);
+  }
+  let note = null;
+  if (text) {
+    const nid = "n-" + at.replace(/\D/g, "").slice(0, 14) + "-" + Math.random().toString(16).slice(2, 6);
+    try { await db.collection("inbox").doc(nid).set({ text, from: "waiting", at }); note = nid; lines.push("- In your words (inbox " + nid + "): " + clip(text, 300)); }
+    catch {}
+  }
+  for (const id of saved) delete tray.cards[id];
+  if (note) { $("tray-text").value = $("tray-text").value.startsWith(raw) ? $("tray-text").value.slice(raw.length).trimStart() : $("tray-text").value; tray.text = $("tray-text").value; }
+  keepTray(); drawTray();
+  if (!lines.length) { st("Couldn't save them. They're still here: try again, or say it in the chat."); send.disabled = false; return; }
+  const failed = ids.length - saved.length + (text && !note ? 1 : 0);
+  st("Saved. Waking the keeper…");
+  // One wake for all of them.
+  const { how, code, detail } = await within(tell("[Desk] " + lines.length + (lines.length > 1 ? " answers" : " answer") + ", sent together:\n" + lines.join("\n"), anchor), 15e3).catch(() => ({ how: "kept", code: "timeout" }));
+  for (const id of saved) db.collection("tasks").doc(id).update(how === "sent" ? { answerSent: true } : { answerSent: false, sendErr: code, sendErrDetail: detail || "" }).catch(() => {});
+  if (note && how !== "sent") db.collection("inbox").doc(note).update({ sendErr: code, sendErrDetail: detail || "" }).catch(() => {});
+  st((SENT[how] || SENT.kept) + (failed ? " " + failed + " couldn't be saved; they're still here." : ""));
+  toast(how === "sent" ? "Sent together to the keeper" : "Saved");
+  drawTray();
+}
 
 // The Desk's look (rule 16): a theme and an icon, so each Desk is told apart at a glance. Kept
 // in the page's settings/look row (/desk:look), with what the page was made with as a fallback.
@@ -757,6 +884,7 @@ function body(id, t, docked) {
   const sl = stepLink(t); if (sl) b.append(linkTo(el("a", "btn primary step", sl.label || "Open"), safeUrl(sl.url)));
   if (t.recommend) b.append(field("Recommended", inline(el("p"), t.recommend)));
   if (t.ifNone) b.append(field("If you have no preference", inline(el("p"), t.ifNone)));
+  if (db && isOwner && t.state === "waiting") { const pr = pickRow(id, t); if (pr) b.append(pr); }
   if (t.context) { const x = el("div"); x.style.display = "grid"; x.style.gap = "8px"; x.append(block(t.context)); b.append(field("What this is", x)); }
   const deps = depList(t.dependsOn); if (deps) b.append(field("Waiting on", deps));
   folds(id, t, b);
@@ -1115,6 +1243,7 @@ function render(docs) {
   ui.sig = sig;
   const h = held();
   if (h && $("l-waiting").contains(h)) ui.stale = true; else drawWaiting();
+  drawTray();
   const workRows = (where) => working.map(([id, t], i) => listCard(id, t, i + 1, where)), schedRows = () => scheduled.map(([id, t]) => row(id, t, when(t.when))), doneRows = () => done.map(([id, t]) => row(id, t, t.doneAt ? day(t.doneAt) : ""));
   fill($("l-working"), workRows("w"), "Nothing in progress.");
   fill($("l-scheduled"), schedRows(), "Nothing scheduled.");
@@ -1178,7 +1307,7 @@ function render(docs) {
     $("inbox").hidden = $("strip").hidden = false; $("strip-l").replaceChildren();
     $("strip-n").textContent = "Your notes stopped updating here. Reload the page to see them.";
   });
-  if (isOwner) { assets = await window.claude?.use?.("assets").catch?.(() => null) ?? null; setupNoteBox(); }
+  if (isOwner) { assets = await window.claude?.use?.("assets").catch?.(() => null) ?? null; setupNoteBox(); setupTray(); }
   await loadSeen(u);
   let last = null;
   db.collection("tasks").onSnapshot((snap) => { last = snap.docs; render(last); }, () => { $("count").textContent = "The list stopped updating. Reload the page."; });

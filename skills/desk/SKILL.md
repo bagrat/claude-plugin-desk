@@ -69,7 +69,8 @@ Each in full, with its date, in `reference.md`.
    what to try by hand, or deleted. No Done list.
 10. **The buttons.** 👍 go with the recommended, ⏭ tomorrow 9:00, 💬 the chat; a `step` (done
     off the page) has its link as the main button and 👍 reads Done. Held cards wait under
-    Later until asked for. News has Seen and Add a note.
+    Later until asked for. News has Seen and Add a note. Several questions on one card are a
+    numbered list in its ask: the page gives each a Yes / No, and "All as recommended".
 11. **One writer.** Only the keeper writes cards and pushes the owner; others report to it, or
     drop a note in the Inbox. Routines run as their own short sessions and leave their results
     there (`note --routine NAME`, a watch with `--only-new`), exempt from rule 1. A child
@@ -91,4 +92,5 @@ Each in full, with its date, in `reference.md`.
 The page's buttons and note tab save to the database and post a "sent to Claude" comment that
 wakes the keeper through its watch (ArtifactComments `watch`). On a wake: read the thread, act,
 reply in one line, resolve it, update the row. A `[Desk note] … (inbox <id>)` wake: sort that
-note from its row.
+note from its row. A `[Desk] N answers, sent together:` wake carries one line per card
+(`task <id>`) and maybe dictated words (`inbox <id>`): handle them all in that one turn.
