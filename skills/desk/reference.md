@@ -63,6 +63,7 @@ directory; `--desk FILE` (before the command) or `$DESK_CONFIG` names another.
 | `python3 $S sorted $R <note-id> […]` | The deletes for notes now held by cards. |
 | `python3 $S note --text "…" --from <where> --out DIR [--image ID=caption]` | A note for this Desk's Inbox (what `/desk:note` runs). |
 | `python3 $S note --routine NAME [--only-new] --text "…" --out DIR` | A routine's result for the Inbox (rule 11); with `--only-new`, a watch: no note when the text is what it last reported, or empty. |
+| `python3 $S spawn "<task>" --live live.json --prompt-file F [--kind K] [--model M] [--source-url U] [--branch B]` | A child session for one task (rule 11): refuses while a live session in `live.json` (list_sessions' result, pasted) holds the task, and prints create_session's arguments with every default set. |
 | `python3 $S look [--theme T] [--emoji E \| --image ASSET \| --letter L] [--current row.json] [--list]` | The `settings/look` row (rule 16). |
 | `python3 $S when "tomorrow 9:00"\|"today 17:30"\|"2026-11-02 9:00"\|ISO` | A time in the owner's zone: their words to the UTC ISO a row stores (`snoozeUntil`, `when`), or a stored ISO as they read it. |
 | `python3 $S backup $R --out FILE [--private-repo]` | Before a handoff: the cards, notes and look as read, in one JSON file with a timestamp. Refuses a file inside a git repo (a project's repo may be public) unless `--private-repo`. |
@@ -186,8 +187,8 @@ it.
    `[✦ K ··· ● N ··· ◌ M](<page>#news)`, K news, N waiting minus snoozed, M working, counted from
    the rows read fresh (`footer`), never from memory. Without news: `[● N ··· ◌ M](<page>#waiting)`.
 9. **Finished tasks.** A card closes at the end of its step (2026-10-30): the turn its work is
-   done (every session behind it completed, `check` flags it), not later. No Done list. A finished task with something to tell becomes news with
-   its recap (`move … news --context …`). Anything to try by hand stays a Waiting card (kind
+   done (every session behind it completed, `check` flags it), not later. No Done list. A
+   finished task with something to tell becomes news with its recap (`move … news --context …`). Anything to try by hand stays a Waiting card (kind
    `check`). Otherwise the card closes on their answer (`move … done`).
 10. **The buttons.** On a Waiting card: 👍 go with the recommended (to In progress), ⏭ back
     tomorrow at 9:00 in the owner's zone, 💬 say it in the chat. **A step only the owner can do off the page** (open a
@@ -213,6 +214,15 @@ it.
     (a routine that checks for change) writes only when something is new
     (`note --routine NAME --only-new`, which keeps what it last reported under
     `~/.cache/desk/routines`, never in git; nothing new: no note, no wake).
+    **Spawning** (2026-10-30): substantial work gets its own session, made with `spawn`, never
+    by hand. List the live sessions first (list_sessions, pasted into `live.json`): when one
+    already holds the task (its handle, like `AB-12`, in the title, or most of its words),
+    `spawn` refuses and names it; send the question there (send_message), or ask a subagent.
+    One task never gets two sessions. Otherwise it prints create_session's arguments, always
+    with `source_url`, `outcome_branch`, `permission_mode: "auto"`, `send_message` in
+    `extra_allowed_tools`, the model, and the prompt ending with how to report to the keeper.
+    The defaults come from `desk.json`: `"spawn": {"model", "models": {kind: model},
+    "source_url", "extra_allowed_tools"}`.
 12. **Before every message.** Rows and notes read fresh, only the sessions behind cards checked,
     only changed cards written, by small edits. That's `prep`. Fresh means for this message, a
     one-line one too: the owner's Seen deletes rows meanwhile. `prep` and `footer` refuse a dump

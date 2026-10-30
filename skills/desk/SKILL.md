@@ -39,7 +39,8 @@ The plan: `{"moves": [{"id", "to": news|working|waiting|held|done, "ask", "recom
 written once; a refused step writes nothing.
 
 Often too: `sessions $R` (the sessions to check, one `get_session` each), `when "tomorrow
-9:00"` (the owner's time to stored UTC and back), `footer $R`, `order $R`, `inbox $R`, `note`. The one-at-a-time commands (`move`, `rank`,
+9:00"` (the owner's time to stored UTC and back), `footer $R`, `order $R`, `inbox $R`, `note`,
+`spawn` (a child session's arguments, rule 11). The one-at-a-time commands (`move`, `rank`,
 `images`, `dep`, `pushed`, `sorted`) and the rest are in the reference.
 
 ## The 17 rules, short
@@ -70,7 +71,9 @@ Each in full, with its date, in `reference.md`.
     Later until asked for. News has Seen and Add a note.
 11. **One writer.** Only the keeper writes cards and pushes the owner; others report to it, or
     drop a note in the Inbox. Routines run as their own short sessions and leave their results
-    there (`note --routine NAME`, a watch with `--only-new`), exempt from rule 1.
+    there (`note --routine NAME`, a watch with `--only-new`), exempt from rule 1. A child
+    session comes from `spawn` only: it refuses a second session on a live task and sets every
+    default (repo, branch, auto mode, `send_message`, the model).
 12. **Before every message**: rows and notes read fresh, sessions checked, only changed cards
     written. That's `prep`.
 13. **A push for every new waiting card**, one push for all of them, then `pushed`.

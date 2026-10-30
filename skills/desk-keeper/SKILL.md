@@ -67,9 +67,13 @@ When the Desk orchestrator says a fix merged, or `prep` says Desk has an update,
 
 ## Sessions
 
-- **Substantial work gets its own session.** Spawn it and track it rather than doing it,
-  with `permission_mode: "auto"` and `mcp__claude-code-remote__send_message` in
-  `extra_allowed_tools`, or its reports arrive held.
+- **Substantial work gets its own session, from `spawn`.** List the live sessions
+  (list_sessions) into `<scratch>/live.json`, then `python3 $S spawn "<task>" --live
+  <scratch>/live.json --prompt-file <prompt>`: it refuses when a live session already holds
+  the task (send it the question instead), and otherwise prints create_session's arguments,
+  with auto mode, `send_message` pre-approved, the repo, the branch and the model set. Pass
+  them as printed; track the session rather than doing its work. A question about existing
+  work goes to the session that owns it, or a subagent; never a new session.
 - **Only you push the owner.** A child pushes them only when it absolutely needs them and
   can't go through you.
 - **Routines report to the Inbox.** A scheduled task you set up runs as its own short session

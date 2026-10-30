@@ -703,6 +703,57 @@ class Unchanged(Base):
         self.assertIn("Busy card", out)
 
 
+class Spawn(Base):
+    """One spawn command (review §3, §7): one live session per task, every default set."""
+
+    def setUp(self):
+        super().setUp()
+        cfg = {"title": "Test Desk", "page": PAGE, "keeper": "session_01KEEP",
+               "spawn": {"model": "model-a", "models": {"review": "model-b"}, "source_url": "https://github.com/o/r"}}
+        Path(os.environ["DESK_CONFIG"]).write_text(json.dumps(cfg))
+        tasks.load_config()
+        self.live = self.root / "live.json"
+
+    def spawn(self, live, *more):
+        self.live.write_text(json.dumps(live))
+        return self.run_cli("spawn", *more, "--live", self.live, "--prompt", "Do the thing.")
+
+    def test_sets_every_default(self):
+        code, out, err = self.spawn({"sessions": [{"id": "session_01X", "title": "AB-7 other work", "status": "idle"}]},
+                                    "AB-12 fix the login")
+        self.assertEqual(code, 0, err)
+        a = json.loads(out)
+        self.assertEqual(a["permission_mode"], "auto")
+        self.assertIn("mcp__claude-code-remote__send_message", a["extra_allowed_tools"])
+        self.assertEqual((a["model"], a["source_url"], a["outcome_branch"]), ("model-a", "https://github.com/o/r", "claude/ab-12-fix-the-login"))
+        self.assertIn("session_01KEEP", a["prompt"])
+        self.assertTrue(a["prompt"].startswith("Do the thing."))
+        code, out, err = self.spawn([], "a review of the pricing page", "--kind", "review")
+        self.assertEqual(json.loads(out)["model"], "model-b")
+
+    def test_refuses_a_second_session_on_a_task(self):
+        live = [{"id": "session_01OWN", "title": "AB-12: login fix", "status_bucket": "working"},
+                {"id": "session_01OLD", "title": "AB-9 done", "status": "archived"}]
+        code, out, err = self.spawn(live, "AB-12 fix the login")
+        self.assertEqual(code, 2)
+        self.assertIn("session_01OWN", err)
+        self.assertIn("send_message", err)
+        self.assertEqual(out, "")
+        code, out, err = self.spawn(live, "AB-9 again")
+        self.assertEqual(code, 0, err)  # its only session is archived
+        code, out, err = self.spawn({"session_01T": "Rework the pricing page layout"}, "pricing page layout")
+        self.assertEqual(code, 2)
+
+    def test_needs_the_live_list_and_a_model(self):
+        with self.assertRaises(SystemExit):
+            self.run_cli("spawn", "AB-1", "--live", self.root / "missing.json", "--prompt", "x")
+        Path(os.environ["DESK_CONFIG"]).write_text(json.dumps({"title": "T", "page": PAGE}))
+        tasks.load_config()
+        code, out, err = self.spawn([], "AB-1", "--source-url", "https://github.com/o/r")
+        self.assertEqual(code, 2)
+        self.assertIn("no model", err)
+
+
 class Held(Base):
     """A review held until the owner asks: on the page under Later, no push, no rank, no count."""
 
@@ -1455,7 +1506,7 @@ class DeskTests(Base):
         # Every command is documented in the reference.
         for name in re.findall(r'sub\.add_parser\("([\w-]+)"|cmd\("([\w-]+)", cmd_', (here / "desk.py").read_text()):
             name = next(x for x in name if x)
-            self.assertIn(f"$S {name}", ref, name)
+            self.assertTrue(f"$S {name}" in ref, f"{name} is not in reference.md")
 
     def test_real_template_renders(self):
         out = self.root / "p.html"

@@ -1181,6 +1181,104 @@ def cmd_apply(a):
     return 0
 
 
+# ---------------------------------------------------------------- spawning a session (review §3, §7)
+
+SEND = "mcp__claude-code-remote__send_message"
+GONE = {"archived", "completed", "failed", "deleted"}
+HANDLE = re.compile(r"\b[A-Z][A-Z0-9]+-\d+\b|#\d+\b")
+
+
+def live_sessions(raw):
+    """The live sessions from a list_sessions result as pasted: a list, {"sessions": [...]}, or
+    {id: title}. Each (id, title); archived, completed and failed ones are left out."""
+    if isinstance(raw, dict) and isinstance(raw.get("sessions"), list):
+        raw = raw["sessions"]
+    if isinstance(raw, dict):
+        raw = [{"id": k, "title": v} for k, v in raw.items()]
+    out = []
+    for x in raw if isinstance(raw, list) else []:
+        if not isinstance(x, dict):
+            continue
+        sid = x.get("id") or x.get("session_id") or ""
+        status = re.sub(r"^.*_", "", str(x.get("status_bucket") or x.get("status") or "")).lower()
+        if sid and status not in GONE:
+            out.append((sid, str(x.get("title") or "")))
+    return out
+
+
+def same_task(task, title):
+    """A live session already on this task: its handle (AI-138, #57) in the title, or most of
+    the task's words."""
+    hs = {h.lower() for h in HANDLE.findall(task)}
+    if hs:
+        return bool(hs & {h.lower() for h in HANDLE.findall(title)})
+    w = words(task)
+    return bool(w) and len(w & words(title)) / len(w) >= 0.6
+
+
+def slug(text):
+    return re.sub(r"-+", "-", re.sub(r"[^a-z0-9]+", "-", text.lower())).strip("-")[:40] or "task"
+
+
+def origin_url():
+    root = git_root(CONFIG_PATH.parent) if CONFIG_PATH else None
+    try:
+        return git(root, "remote", "get-url", "origin") if root else None
+    except (RuntimeError, OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def spawn_args(task, prompt, live, kind=None, model=None, source_url=None, branch=None, title=None, tags=None):
+    """The create_session arguments for a new child, or ValueError: one live session per task,
+    and every default set (auto mode, send_message pre-approved, the repo, the branch, the model)."""
+    owner = [(sid, t) for sid, t in live if same_task(task, t)]
+    if owner:
+        sid, t = owner[0]
+        raise ValueError(f"{sid} (“{t}”) is live on this task: send_message it there instead of a new session "
+                         f"(one live session per task)")
+    cfg = CONFIG.get("spawn") or {}
+    model = model or (cfg.get("models") or {}).get(kind or "") or cfg.get("model")
+    if not model:
+        raise ValueError("no model: pass --model, or set spawn.model (and spawn.models per kind) in desk.json")
+    source_url = source_url or cfg.get("source_url") or origin_url()
+    if not source_url:
+        raise ValueError("no repo: pass --source-url, or set spawn.source_url in desk.json")
+    keeper = CONFIG.get("keeper")
+    report = (f"\n\nYou're a child of the keeper ({keeper}). Report to it with send_message when you open or "
+              "merge a PR, get blocked, or need the owner; nothing for routine progress. Never push the owner "
+              "yourself; the keeper does.") if keeper else ""
+    args = {
+        "title": title or task,
+        "prompt": prompt.rstrip() + report,
+        "source_url": source_url,
+        "outcome_branch": branch or f"claude/{slug(task)}",
+        "permission_mode": "auto",
+        "extra_allowed_tools": sorted(set(cfg.get("extra_allowed_tools") or []) | {SEND}),
+        "model": model,
+    }
+    if tags:
+        args["tags"] = tags
+    return args
+
+
+def cmd_spawn(a):
+    """A child session for one task: refuses while a live session holds it, prints create_session's arguments."""
+    try:
+        raw = json.loads(Path(a.live).read_text())
+    except (OSError, ValueError) as e:
+        sys.exit(f"can't read the live sessions {a.live}: {e} (paste list_sessions' result there first)")
+    prompt = Path(a.prompt_file).read_text() if a.prompt_file else (a.prompt or "")
+    if not prompt.strip():
+        sys.exit("an empty prompt: --prompt or --prompt-file")
+    try:
+        args = spawn_args(a.task, prompt, live_sessions(raw), a.kind, a.model, a.source_url, a.branch, a.title, a.tag)
+    except ValueError as e:
+        print(f"refused: {e}", file=sys.stderr)
+        return 2
+    print(json.dumps(args, ensure_ascii=False, indent=2))
+    return 0
+
+
 # ---------------------------------------------------------------- a fresh read (rule 12)
 
 # How old a dump may be when prep and footer count it: Seen on the page deletes rows meanwhile.
@@ -1951,6 +2049,20 @@ def main(argv=None):
     s.add_argument("--out", help="the directory for look.json (default: beside --current's rows, "
                    "in patches/; without --current, a new temp directory)")
     s.set_defaults(fn=cmd_look)
+
+    s = sub.add_parser("spawn", help="a child session for one task: create_session's arguments, never a second session on it")
+    s.add_argument("task", help="the task: its handle (AI-138, #57) or topic; also the default title and branch")
+    s.add_argument("--live", required=True, help="list_sessions' result as pasted (JSON): the sessions live now")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--prompt")
+    g.add_argument("--prompt-file")
+    s.add_argument("--kind", help="the kind of task, for desk.json's spawn.models")
+    s.add_argument("--model")
+    s.add_argument("--source-url", help="default: desk.json's spawn.source_url, or the project's origin")
+    s.add_argument("--branch", help="outcome_branch (default: claude/<task>)")
+    s.add_argument("--title")
+    s.add_argument("--tag", action="append")
+    s.set_defaults(fn=cmd_spawn)
 
     s = sub.add_parser("when", help="a time in the owner's zone: their words to UTC ISO, or an ISO time as they read it")
     s.add_argument("words", help="'tomorrow 9:00', 'today 17:30', '2026-11-02 9:00', or an ISO time with its zone")
