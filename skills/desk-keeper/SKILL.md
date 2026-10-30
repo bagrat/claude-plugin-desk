@@ -32,8 +32,10 @@ owner may have cleared news since):
 3. **Sort the Inbox** (rule 15): for each note `inbox` lists, fold it into its task's card,
    make a new card, or act on it and post news; move its images onto the card; then `sorted`.
    A note that is feedback on Desk itself (not this project) goes the `feedback` skill's way.
-4. Make this turn's changes with `move`, `images`, `rank`, `dep`, and send the entries they
-   print with ArtifactData `update` / `delete` / `batch`, pinned to the versions from step 1.
+4. Make this turn's changes in one call: write them as a plan (moves, dependsOn items, image
+   swaps, ranks, pushed marks, sorted notes) and run `python3 $S apply <dir> <plan.json>`; send
+   its `writes` as one ArtifactData `batch` and delete its `delete_assets`. (`move`, `images`,
+   `rank`, `dep`, `pushed` and `sorted` still do one at a time.)
 5. `python3 $S prep <dir> --sessions <scratch>/sessions.json --message <scratch>/draft.md`,
    the draft written first when it asks the owner anything: each question in it must be a
    Waiting card's ask, never a card's note (rule 1). When it stops with "the rules

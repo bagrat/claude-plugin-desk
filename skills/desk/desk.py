@@ -1024,6 +1024,145 @@ def set_images(row, images, fold=None, drop_top=False):
     return patch, sorted(before - after)
 
 
+# ---------------------------------------------------------------- one call for a turn (4a)
+
+PLAN_KEYS = ("moves", "deps", "images", "rank", "pushed", "sorted")
+MOVE_ARGS = ("note", "ask", "recommend", "ifnone", "settled", "session", "active", "context", "kind", "link")
+
+
+def local(row, patch):
+    """Apply a patch to a row in memory only."""
+    for k, v in patch.items():
+        if v == DELETE:
+            row.data.pop(k, None)
+        else:
+            row.data[k] = v
+
+
+def apply_plan(rows, notes, plan, now):
+    """A turn's moves, dependsOn items, image swaps, ranks, pushed marks and sorted notes, in that
+    order, each judged on the rows as the earlier ones left them. Returns (patches {id: patch},
+    deleted [row], sorted [note], unused asset ids, messages). Raises ValueError before anything
+    is written: the whole plan goes, or none of it."""
+    unknown = set(plan) - set(PLAN_KEYS)
+    if unknown:
+        raise ValueError(f"unknown plan keys: {', '.join(sorted(unknown))} (use {', '.join(PLAN_KEYS)})")
+    by_id = {r.id: r for r in rows}
+    original = {r.id: set(r.data) for r in rows}
+    patches, deleted, gone, said = {}, [], [], []
+
+    def row(rid, what):
+        r = by_id.get(rid)
+        if r is None or r in deleted:
+            raise ValueError(f"{what}: no row {rid!r}")
+        return r
+
+    def put(r, patch):
+        local(r, patch)
+        patches.setdefault(r.id, {}).update(patch)
+
+    for m in plan.get("moves") or []:
+        r, to = row(m.get("id"), "move"), m.get("to")
+        if to not in ("news", "working", "waiting", "held", "done"):
+            raise ValueError(f"move {r.id}: to {to!r}: news, working, waiting, held or done")
+        bad = set(m) - {"id", "to", *MOVE_ARGS}
+        if bad:
+            raise ValueError(f"move {r.id}: unknown fields {', '.join(sorted(bad))}")
+        if to in ("waiting", "held") and r.get("answer") and m.get("settled") is None:
+            said.append(f"note: {r.id}: the old answer leaves: “{r.get('answer')}”. Keep what it settled with settled.")
+        try:
+            patch = move(r, to, now, **{k: m.get(k) for k in MOVE_ARGS if k != "active"}, active=bool(m.get("active")))
+        except ValueError as e:
+            raise ValueError(f"move {r.id}: {e}") from None
+        if patch is None:
+            deleted.append(r)
+        else:
+            put(r, patch)
+        for d, dp in dependents([x for x in rows if x not in deleted], r.id, DEP_OF_STATE[to]):
+            dp["updatedAt"] = iso(now)
+            said.append(f"note: {d.id} depends on {r.id}: its item set to {DEP_OF_STATE[to]}.")
+            put(d, dp)
+    for d in plan.get("deps") or []:
+        r = row(d.get("id"), "dep")
+        try:
+            patch = set_dep(r, d.get("item", ""), d.get("state"), d.get("card"), bool(d.get("add")))
+        except ValueError as e:
+            raise ValueError(f"dep {r.id}: {e}") from None
+        patch["updatedAt"] = iso(now)
+        put(r, patch)
+    for im in plan.get("images") or []:
+        r = row(im.get("id"), "images")
+        if bool(im.get("top")) == bool(im.get("fold")):
+            raise ValueError(f"images {r.id}: give top: true or a fold")
+        try:
+            images = [dict(x) for x in im.get("images") or []]
+            for x in images:
+                if not re.fullmatch(r"[0-9a-f]{32}", str(x.get("id", ""))):
+                    raise ValueError(f"not an asset id: {x.get('id')!r}")
+            patch, unused = set_images(r, images, None if im.get("top") else str(im["fold"]), bool(im.get("drop_top")))
+        except ValueError as e:
+            raise ValueError(f"images {r.id}: {e}") from None
+        put(r, patch)
+        gone += [g for g in unused if g not in gone]
+    for k in plan.get("rank") or []:
+        r = row(k.get("id"), "rank")
+        if r.get("state") != "waiting" or held(r):
+            raise ValueError(f"rank {r.id}: it isn't in the waiting deck (rule 7)")
+        if not isinstance(k.get("place"), int) or k["place"] < 1:
+            raise ValueError(f"rank {r.id}: give its place, from 1")
+        for rid, n in placed([x for x in rows if x not in deleted], r.id, k["place"]).items():
+            if by_id[rid].get("rank") != n:
+                put(by_id[rid], {"rank": n})
+    for rid in plan.get("pushed") or []:
+        put(row(rid, "pushed"), {PUSHED: iso(now)})
+    by_note = {n.id: n for n in notes}
+    done_notes = []
+    for nid in plan.get("sorted") or []:
+        n = by_note.get(nid)
+        if n is None:
+            raise ValueError(f"sorted: no note {nid!r} in the inbox dump")
+        done_notes.append(n)
+    # A field the row never had needs no delete; a deleted row needs no patch.
+    out = {}
+    for rid, patch in patches.items():
+        if by_id[rid] in deleted:
+            continue
+        p = {k: v for k, v in patch.items() if not (v == DELETE and k not in original[rid])}
+        if p:
+            out[rid] = p
+    return out, deleted, done_notes, gone, said
+
+
+def cmd_apply(a):
+    """One call for the turn: every write it makes, in one batch."""
+    rows, now = load_rows(a.rows), now_arg(a.now)
+    notes = load_inbox(a.rows)
+    try:
+        plan = json.loads(sys.stdin.read() if a.plan == "-" else Path(a.plan).read_text())
+        if not isinstance(plan, dict):
+            raise ValueError("a plan is a JSON object")
+        versions = {r.id: r.version for r in rows}
+        patches, deleted, done_notes, gone, said = apply_plan(rows, notes, plan, now)
+    except ValueError as e:
+        print(f"refused: {e}", file=sys.stderr)
+        return 2
+    for s in said:
+        print(s, file=sys.stderr)
+    by_id = {r.id: r for r in rows}
+    writes = [write_patch(a.rows, by_id[rid], p, versions[rid], a.out) for rid, p in patches.items()]
+    writes += [delete_entry(r, versions[r.id]) for r in deleted]
+    for n in done_notes:
+        e = {"op": "delete", "collection": INBOX, "doc_id": n.id}
+        if n.version is not None:
+            e["if_version"] = n.version
+        n.path.unlink()
+        writes.append(e)
+    if any("if_version" not in w for w in writes):
+        print("note: some rows have no version known; add if_version from the list result.", file=sys.stderr)
+    print(json.dumps({"writes": writes, "delete_assets": gone}, ensure_ascii=False, indent=2))
+    return 0
+
+
 # ---------------------------------------------------------------- a fresh read (rule 12)
 
 # How old a dump may be when prep and footer count it: Seen on the page deletes rows meanwhile.
@@ -1385,27 +1524,66 @@ def describe(r):
     return f"{r.get('handle') or r.id} [{', '.join(bits)}] {r.get('title', '')}"
 
 
-def cmd_order(a):
+def digest(r):
+    return hashlib.sha1(json.dumps(r.data, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
+
+
+def seen_path(d):
+    """What the last prep listed, beside the dumps (each read is a new directory in one scratch)."""
+    return dump_dir(rows_dir(d)).parent / ".desk-seen.json"
+
+
+def unchanged_since_seen(d, rows):
+    """The ids whose rows read the same as at the last prep, and record this read for the next."""
+    f = seen_path(d)
+    try:
+        seen = json.loads(f.read_text()).get(PAGE or "", {})
+    except (OSError, ValueError, AttributeError):
+        seen = {}
+    now = {r.id: digest(r) for r in rows}
+    try:
+        f.write_text(json.dumps({PAGE or "": now}, indent=2) + "\n")
+    except OSError:
+        pass
+    return {rid for rid, h in now.items() if seen.get(rid) == h}
+
+
+def cmd_order(a, unchanged=frozenset()):
+    """The page's order. With `unchanged` (prep), rows the last prep listed as they are now are
+    named only, or counted, not described again."""
     rows, now = load_rows(a.rows), now_arg(a.now)
     deck = ordered(rows, now)
+    same = lambda rs: [r for r in rs if r.id in unchanged]
+    fresh = lambda rs: [r for r in rs if r.id not in unchanged]
+
+    def more(rs):
+        return f"  (+{len(same(rs))} unchanged)" if same(rs) else None
+
     items = news(rows)
     if items:
         print("News:")
-        for r in items:
+        for r in fresh(items):
             print(f"  - {r.get('handle') or r.id}: {r.get('title', '')}")
+        if more(items):
+            print(more(items))
     print("Waiting:")
     for i, r in enumerate(deck, 1):
-        print(f"  {i}. {describe(r)}")
+        print(f"  {i}. {r.get('handle') or r.id} (unchanged)" if r.id in unchanged else f"  {i}. {describe(r)}")
     later = [r for r in by_state(rows, "waiting") if parked(r, now)]
     if later:
         print("Later:")
-        for r in later:
+        for r in fresh(later):
             t = parse_time(r.get("snoozeUntil"))
             back = "review when you ask" if held(r) else f"back {owner_time(t) if t else r.get('snoozeUntil')}"
             print(f"  - {describe(r)} ({back})")
+        if more(later):
+            print(more(later))
     print("In progress:")
-    for r in sorted(by_state(rows, "working"), key=lambda r: str(r.get("workingSince") or r.get("updatedAt") or ""), reverse=True):
+    working_rows = sorted(by_state(rows, "working"), key=lambda r: str(r.get("workingSince") or r.get("updatedAt") or ""), reverse=True)
+    for r in fresh(working_rows):
         print(f"  - {describe(r)}")
+    if more(working_rows):
+        print(more(working_rows))
     return 0
 
 
@@ -1552,7 +1730,8 @@ def cmd_prep(a):
     code = code or (1 if notes else 0)
     if code == 0:
         print("check: ok")
-    cmd_order(a)
+    rows = load_rows(a.rows)
+    cmd_order(a, frozenset() if a.full else unchanged_since_seen(a.rows, rows))
     print()
     cmd_footer(a)
     return code
@@ -1634,6 +1813,8 @@ def main(argv=None):
             s.add_argument("--max-age", type=float, default=READ_MINUTES,
                            help=f"refuse rows read longer ago than this, in minutes (default {READ_MINUTES})")
             s.add_argument("--message", help="the draft about to go out: flag its questions no Waiting card holds")
+            s.add_argument("--full", action="store_true",
+                           help="describe every row, not only those changed since the last prep")
     s = cmd("footer", cmd_footer, "the footer line")
     s.add_argument("--max-age", type=float, default=READ_MINUTES,
                    help=f"refuse rows read longer ago than this, in minutes (default {READ_MINUTES})")
@@ -1684,6 +1865,10 @@ def main(argv=None):
     s.add_argument("--drop-top", action="store_true", help="with --fold: clear the top images")
     s.add_argument("--if-version", type=int)
     s.add_argument("--out")
+
+    s = cmd("apply", cmd_apply, "a turn's moves, deps, images, ranks, pushed marks and sorted notes: one batch")
+    s.add_argument("plan", help="a JSON file (or - for stdin): {moves, deps, images, rank, pushed, sorted}")
+    s.add_argument("--out", help="where patch files go (default: <rows>/../patches)")
 
     cmd("inbox", cmd_inbox, "the notes waiting to be sorted (rule 15)")
     s = cmd("sorted", cmd_sorted, "the deletes for notes now on cards (rule 15)")

@@ -596,6 +596,95 @@ class Pushes(Base):
         self.assertEqual(patch["pushedAt"], {"__delete__": True})
 
 
+class Apply(Base):
+    """One call for a turn's writes (4a): one batch, each row written once, pinned to its read."""
+
+    def plan(self, plan):
+        f = self.root / "plan.json"
+        f.write_text(json.dumps(plan))
+        return self.run_cli("apply", self.dir, f, "--now", NOW)
+
+    def test_moves_images_ranks_and_pushes_in_one_batch(self):
+        self.put("a", working(), version=3)
+        self.put("b", waiting(rank=1), version=4)
+        self.put("c", waiting(dependsOn=[{"item": "a's work", "card": "a", "state": "building"}], rank=2), version=5)
+        (self.root / "dump" / "inbox" / "n-1.json").write_text(json.dumps({"text": "x", "from": "page", "at": NOW}))
+        code, out, err = self.plan({
+            "moves": [{"id": "a", "to": "waiting", "ask": "Ship it?", "recommend": "Yes.", "context": FULL}],
+            "images": [{"id": "a", "top": True, "images": [{"id": A, "caption": "the screen"}]}],
+            "rank": [{"id": "a", "place": 1}],
+            "pushed": ["a"],
+            "sorted": ["n-1"]})
+        self.assertEqual(code, 0, err)
+        res = json.loads(out)
+        by = {(w["collection"], w["doc_id"]): w for w in res["writes"]}
+        # Each row once, pinned to the version it was read at.
+        self.assertEqual(len(res["writes"]), len(by))
+        self.assertEqual(by[("tasks", "a")]["if_version"], 3)
+        self.assertEqual(by[("tasks", "b")]["if_version"], 4)
+        self.assertEqual(by[("tasks", "c")]["if_version"], 5)
+        self.assertEqual(by[("inbox", "n-1")]["op"], "delete")
+        a = json.loads(Path(by[("tasks", "a")]["file_path"]).read_text())
+        self.assertEqual((a["state"], a["rank"], a["pushedAt"], a["images"][0]["id"]), ("waiting", 1, NOW, A))
+        self.assertNotIn("workingSince", tasks.load_rows(self.dir)[0].data)
+        c = json.loads(Path(by[("tasks", "c")]["file_path"]).read_text())
+        self.assertEqual(c["dependsOn"][0]["state"], "open")
+        self.assertEqual(c["rank"], 3)
+        self.assertEqual(self.problems(), [])
+
+    def test_a_refused_step_writes_nothing(self):
+        self.put("a", working(), version=3)
+        self.put("b", waiting(), version=4)
+        before = (self.dir / "a.json").read_text()
+        code, out, err = self.plan({"pushed": ["b"], "moves": [{"id": "a", "to": "waiting"}]})
+        self.assertEqual(code, 2)
+        self.assertIn("move a", err)
+        self.assertEqual(out, "")
+        self.assertEqual((self.dir / "a.json").read_text(), before)
+        self.assertFalse((self.root / "dump" / "patches").exists())
+
+    def test_done_is_a_delete_and_unknown_keys_are_refused(self):
+        self.put("a", working(), version=3)
+        code, out, err = self.plan({"moves": [{"id": "a", "to": "done"}], "pushed": ["a"]})
+        self.assertEqual(code, 2)
+        self.assertIn("no row 'a'", err)
+        code, out, err = self.plan({"moves": [{"id": "a", "to": "done"}]})
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["writes"], [{"op": "delete", "collection": "tasks", "doc_id": "a", "if_version": 3}])
+        code, out, err = self.plan({"move": []})
+        self.assertEqual(code, 2)
+        self.assertIn("unknown plan keys", err)
+
+    def test_swapped_images_are_named_for_deletion(self):
+        self.put("a", waiting(images=[{"id": A, "caption": "old"}]), version=1)
+        code, out, err = self.plan({"images": [{"id": "a", "top": True, "images": [{"id": B, "caption": "new"}]}]})
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["delete_assets"], [A])
+
+
+class Unchanged(Base):
+    """prep describes only the rows changed since the last prep (4a)."""
+
+    def prep(self, *more):
+        return self.run_cli("prep", self.dir, "--now", NOW, "--no-rules", *more)
+
+    def test_second_prep_names_unchanged_rows_only(self):
+        self.put("a", waiting(handle="alpha", title="Alpha card"))
+        self.put("w", working(handle="busy", title="Busy card"))
+        code, out, _ = self.prep()
+        self.assertIn("Alpha card", out)
+        self.assertIn("Busy card", out)
+        code, out, _ = self.prep()
+        self.assertIn("1. alpha (unchanged)", out)
+        self.assertNotIn("Busy card", out)
+        self.assertIn("(+1 unchanged)", out)
+        self.put("a", waiting(handle="alpha", title="Alpha card, new ask", ask="Now which?"))
+        code, out, _ = self.prep()
+        self.assertIn("Alpha card, new ask", out)
+        code, out, _ = self.prep("--full")
+        self.assertIn("Busy card", out)
+
+
 class Held(Base):
     """A review held until the owner asks: on the page under Later, no push, no rank, no count."""
 

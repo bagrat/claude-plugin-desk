@@ -48,6 +48,7 @@ directory; `--desk FILE` (before the command) or `$DESK_CONFIG` names another.
 | --- | --- |
 | `python3 $S sessions $R` | The sessions behind open cards, one per line, to check one by one (`get_session`). |
 | `python3 $S prep $R --sessions sessions.json [--message draft.md]` | **Before every message.** The rule-reload check, the checks, the notes to sort, the deck in the page's order, the footer. With `--message`, each numbered question or "Recommended:" line in the draft that no Waiting card holds. Exit 1 when anything is left to do. Refuses rows read more than 2 minutes ago (`--max-age MIN`). |
+| `python3 $S apply $R plan.json` | **The turn's writes in one call**: `{"moves": [{id, to, ask?, recommend?, …}], "deps": [{id, item, state}], "images": [{id, top\|fold, images}], "rank": [{id, place}], "pushed": [id], "sorted": [note-id]}`. Prints `{"writes", "delete_assets"}`: send `writes` as one ArtifactData `batch`. Each row is written once, pinned to its read; a refused step writes nothing. |
 | `python3 $S loaded` | Mark the rules reloaded, after you've re-read what `prep` or `update` named. |
 | `python3 $S update` | `/desk:update`: pull the plugin's clone at `~/.claude/desk` (clone it if missing) and name what changed since you loaded it. Exit 1 when there's something to re-read. |
 | `python3 $S check $R [--sessions …] [--stale-hours 12]` | The checks alone. |
@@ -68,6 +69,9 @@ directory; `--desk FILE` (before the command) or `$DESK_CONFIG` names another.
 | `python3 $S page --out FILE` | The page to publish for this Desk: the template with its title, keeper, time zone and look. |
 | `python3 $S scrub DRAFT [--rows $R]` | What in a feedback draft might carry the Desk's content (rule 17). |
 | `python3 $S issue-url --title T --body FILE [--rows $R]` | A prefilled new-issue link on the plugin's repo; refuses while `scrub` flags anything. |
+
+`prep` describes only the rows changed since the last `prep` (kept beside the dumps, in
+`.desk-seen.json`); the rest it names, or counts as "unchanged". `--full` describes them all.
 
 `sessions.json` is what you saw: `{"session_…": "<status_bucket>"}`. `--now ISO` judges at
 another time.
