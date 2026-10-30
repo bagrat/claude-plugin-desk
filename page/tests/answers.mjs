@@ -33,7 +33,7 @@ for (const scheme of ['dark', 'light']) {
 // Two cards and dictated words go together: each saved, one wake.
 { const s = await open(b, { db: { tasks: rows } });
   const card = '.stage > .card';
-  await s.p.click(card + ' [aria-label="1: yes"]'); await s.p.click(card + ' [aria-label="2: yes"]'); await s.p.click(card + ' [aria-label="3: no"]');
+  await s.p.click(card + ' [aria-label="1: yes"]'); await s.p.click(card + ' [aria-label="2: no"]'); await s.p.click(card + ' [aria-label="3: yes"]');
   // Swipe on to the next card with a dash.
   await s.p.click('.dash >> nth=1'); await s.p.waitForTimeout(400);
   ok(await s.p.textContent(card + ' .t-title') === 'Pick a font', 'the next card');
@@ -48,7 +48,7 @@ for (const scheme of ['dark', 'light']) {
   await s.p.click('#tray-sum'); await s.p.click('#tray-send'); await s.p.waitForTimeout(400);
   const log = await s.log(), ups = log.filter((e) => e[0] === 'update' && e[1] === 'tasks' && e[3].state === 'working');
   ok(ups.length === 2, 'each card is saved, moved to In progress');
-  ok(ups.find((e) => e[2] === 'launch')?.[3].answer === '1: yes. 2: yes. 3: no.', 'its answer per question');
+  ok(ups.find((e) => e[2] === 'launch')?.[3].answer === '1: yes. 2: no. 3: yes.', 'its answer per question');
   ok(ups.find((e) => e[2] === 'font')?.[3].answer === 'All as recommended: Serif headings, sans body.', 'all as recommended');
   const note = log.find((e) => e[0] === 'set' && e[1] === 'inbox');
   ok(note && note[3].text === 'The one question: merge it after lunch.' && note[3].from === 'waiting', 'the dictated words are an Inbox note');
