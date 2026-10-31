@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__claude-artifacts__db_get",
+      "mcp__claude-artifacts__db_list",
+      "mcp__claude-artifacts__db_query",
+      "mcp__claude-artifacts__db_write"
+    ]
+  }
+}
