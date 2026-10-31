@@ -262,6 +262,24 @@ class Checks(Base):
         self.assertTrue(any("no session is" in x for x in m))
         self.assertEqual(self.msgs("a", {"session_01AAAA": "completed", "session_01BBBB": "working"}), [])
 
+    def test_card_closes_at_the_end_of_its_step(self):
+        # 4c: every session behind it completed: the step is over, the card closes this turn.
+        self.put("a", working())
+        msgs = [m for _, m in self.problems({"session_01AAAA": "completed"})]
+        self.assertTrue(any("step is over" in m for m in msgs), msgs)
+        msgs = [m for _, m in self.problems({"session_01AAAA": "idle"})]
+        self.assertFalse(any("step is over" in m for m in msgs), msgs)
+        self.assertTrue(any("working but no session is" in m for m in msgs), msgs)
+
+    def test_a_row_past_8_kb_is_flagged_and_warned_on_write(self):
+        self.put("a", waiting(details=[{"title": "Long", "text": "x" * 9000}]))
+        self.assertTrue(any("past 8 KB" in m for _, m in self.problems()))
+        self.put("b", working(context="y" * 8000))
+        self.assertFalse(any(rid == "b" and "KB" in m for rid, m in self.problems()))
+        code, out, err = self.run_cli("move", self.dir, "b", "working", "--now", NOW, "--note", "z" * 500)
+        self.assertEqual(code, 0, err)
+        self.assertIn("past 8 KB", err)
+
     def test_working_session_not_checked_or_blocked(self):
         self.put("a", working())
         self.assertTrue(any("not checked" in m for m in self.msgs("a", {})))
@@ -345,6 +363,37 @@ class Checks(Base):
         code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-rules", "--message", draft)
         self.assertEqual(code, 0, out)
         self.assertIn("check: ok", out)
+
+    def test_prep_message_flags_questions_already_answered_or_ruled(self):
+        # Review §9: the prep check, in code: never ask what's settled.
+        self.put("a", waiting(ask="Which font for the headings?", recommend="The serif.",
+                              details=[{"title": "Settled so far", "text": "The body text stays in the sans font. Margins are fixed."}]))
+        self.put("b", working(ask="Ship the beta on Friday?", answer="Yes, ship it Friday."))
+        ruled = self.root / "rulings.md"
+        ruled.write_text("- Releases always go out with release notes drafted first.\n")
+        draft = self.root / "draft.md"
+        draft.write_text("1. Should the body text stay in the sans font?\n"
+                         "2. Ship the beta on Friday?\n"
+                         "3. Are release notes drafted first for releases?\n"
+                         "4. Which font for the headings?\n")
+        code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-rules", "--message", draft, "--ruled", ruled)
+        self.assertEqual(code, 1)
+        self.assertIn("already answered or ruled (a's Settled so far)", out)
+        self.assertIn("already answered or ruled (b's answer)", out)
+        self.assertIn("already answered or ruled (rulings.md:1)", out)
+        self.assertNotIn("headings?” is already", out)
+        self.assertEqual(out.count("on no Waiting card"), 0)
+
+    def test_rulings_named_in_desk_json(self):
+        (self.root / "notes").mkdir()
+        (self.root / "notes" / "rulings.md").write_text("Reviews wait until the owner asks for them.\n")
+        (self.root / ".claude").mkdir()
+        cfg = self.root / ".claude" / "desk.json"
+        cfg.write_text(json.dumps({"title": "T", "page": PAGE, "rulings": ["notes/rulings.md"]}))
+        tasks.load_config(cfg)
+        self.assertEqual([f.name for f in tasks.rulings_files()], ["rulings.md"])
+        found = tasks.settled_asks("1. Should reviews wait until the owner asks for them?", [], tasks.rulings_files())
+        self.assertEqual([w for _, w in found], ["rulings.md:1"])
 
     def test_same_handle_twice(self):
         self.put("a", waiting(handle="Price box"))
@@ -594,6 +643,146 @@ class Pushes(Base):
         self.assertEqual(code, 0, err)
         patch = json.loads(Path(json.loads(out)[0]["file_path"]).read_text())
         self.assertEqual(patch["pushedAt"], {"__delete__": True})
+
+
+class Apply(Base):
+    """One call for a turn's writes (4a): one batch, each row written once, pinned to its read."""
+
+    def plan(self, plan):
+        f = self.root / "plan.json"
+        f.write_text(json.dumps(plan))
+        return self.run_cli("apply", self.dir, f, "--now", NOW)
+
+    def test_moves_images_ranks_and_pushes_in_one_batch(self):
+        self.put("a", working(), version=3)
+        self.put("b", waiting(rank=1), version=4)
+        self.put("c", waiting(dependsOn=[{"item": "a's work", "card": "a", "state": "building"}], rank=2), version=5)
+        (self.root / "dump" / "inbox" / "n-1.json").write_text(json.dumps({"text": "x", "from": "page", "at": NOW}))
+        code, out, err = self.plan({
+            "moves": [{"id": "a", "to": "waiting", "ask": "Ship it?", "recommend": "Yes.", "context": FULL}],
+            "images": [{"id": "a", "top": True, "images": [{"id": A, "caption": "the screen"}]}],
+            "rank": [{"id": "a", "place": 1}],
+            "pushed": ["a"],
+            "sorted": ["n-1"]})
+        self.assertEqual(code, 0, err)
+        res = json.loads(out)
+        by = {(w["collection"], w["doc_id"]): w for w in res["writes"]}
+        # Each row once, pinned to the version it was read at.
+        self.assertEqual(len(res["writes"]), len(by))
+        self.assertEqual(by[("tasks", "a")]["if_version"], 3)
+        self.assertEqual(by[("tasks", "b")]["if_version"], 4)
+        self.assertEqual(by[("tasks", "c")]["if_version"], 5)
+        self.assertEqual(by[("inbox", "n-1")]["op"], "delete")
+        a = json.loads(Path(by[("tasks", "a")]["file_path"]).read_text())
+        self.assertEqual((a["state"], a["rank"], a["pushedAt"], a["images"][0]["id"]), ("waiting", 1, NOW, A))
+        self.assertNotIn("workingSince", tasks.load_rows(self.dir)[0].data)
+        c = json.loads(Path(by[("tasks", "c")]["file_path"]).read_text())
+        self.assertEqual(c["dependsOn"][0]["state"], "open")
+        self.assertEqual(c["rank"], 3)
+        self.assertEqual(self.problems(), [])
+
+    def test_a_refused_step_writes_nothing(self):
+        self.put("a", working(), version=3)
+        self.put("b", waiting(), version=4)
+        before = (self.dir / "a.json").read_text()
+        code, out, err = self.plan({"pushed": ["b"], "moves": [{"id": "a", "to": "waiting"}]})
+        self.assertEqual(code, 2)
+        self.assertIn("move a", err)
+        self.assertEqual(out, "")
+        self.assertEqual((self.dir / "a.json").read_text(), before)
+        self.assertFalse((self.root / "dump" / "patches").exists())
+
+    def test_done_is_a_delete_and_unknown_keys_are_refused(self):
+        self.put("a", working(), version=3)
+        code, out, err = self.plan({"moves": [{"id": "a", "to": "done"}], "pushed": ["a"]})
+        self.assertEqual(code, 2)
+        self.assertIn("no row 'a'", err)
+        code, out, err = self.plan({"moves": [{"id": "a", "to": "done"}]})
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["writes"], [{"op": "delete", "collection": "tasks", "doc_id": "a", "if_version": 3}])
+        code, out, err = self.plan({"move": []})
+        self.assertEqual(code, 2)
+        self.assertIn("unknown plan keys", err)
+
+    def test_swapped_images_are_named_for_deletion(self):
+        self.put("a", waiting(images=[{"id": A, "caption": "old"}]), version=1)
+        code, out, err = self.plan({"images": [{"id": "a", "top": True, "images": [{"id": B, "caption": "new"}]}]})
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["delete_assets"], [A])
+
+
+class Unchanged(Base):
+    """prep describes only the rows changed since the last prep (4a)."""
+
+    def prep(self, *more):
+        return self.run_cli("prep", self.dir, "--now", NOW, "--no-rules", *more)
+
+    def test_second_prep_names_unchanged_rows_only(self):
+        self.put("a", waiting(handle="alpha", title="Alpha card"))
+        self.put("w", working(handle="busy", title="Busy card"))
+        code, out, _ = self.prep()
+        self.assertIn("Alpha card", out)
+        self.assertIn("Busy card", out)
+        code, out, _ = self.prep()
+        self.assertIn("1. alpha (unchanged)", out)
+        self.assertNotIn("Busy card", out)
+        self.assertIn("(+1 unchanged)", out)
+        self.put("a", waiting(handle="alpha", title="Alpha card, new ask", ask="Now which?"))
+        code, out, _ = self.prep()
+        self.assertIn("Alpha card, new ask", out)
+        code, out, _ = self.prep("--full")
+        self.assertIn("Busy card", out)
+
+
+class Spawn(Base):
+    """One spawn command (review §3, §7): one live session per task, every default set."""
+
+    def setUp(self):
+        super().setUp()
+        cfg = {"title": "Test Desk", "page": PAGE, "keeper": "session_01KEEP",
+               "spawn": {"model": "model-a", "models": {"review": "model-b"}, "source_url": "https://github.com/o/r"}}
+        Path(os.environ["DESK_CONFIG"]).write_text(json.dumps(cfg))
+        tasks.load_config()
+        self.live = self.root / "live.json"
+
+    def spawn(self, live, *more):
+        self.live.write_text(json.dumps(live))
+        return self.run_cli("spawn", *more, "--live", self.live, "--prompt", "Do the thing.")
+
+    def test_sets_every_default(self):
+        code, out, err = self.spawn({"sessions": [{"id": "session_01X", "title": "AB-7 other work", "status": "idle"}]},
+                                    "AB-12 fix the login")
+        self.assertEqual(code, 0, err)
+        a = json.loads(out)
+        self.assertEqual(a["permission_mode"], "auto")
+        self.assertIn("mcp__claude-code-remote__send_message", a["extra_allowed_tools"])
+        self.assertEqual((a["model"], a["source_url"], a["outcome_branch"]), ("model-a", "https://github.com/o/r", "claude/ab-12-fix-the-login"))
+        self.assertIn("session_01KEEP", a["prompt"])
+        self.assertTrue(a["prompt"].startswith("Do the thing."))
+        code, out, err = self.spawn([], "a review of the pricing page", "--kind", "review")
+        self.assertEqual(json.loads(out)["model"], "model-b")
+
+    def test_refuses_a_second_session_on_a_task(self):
+        live = [{"id": "session_01OWN", "title": "AB-12: login fix", "status_bucket": "working"},
+                {"id": "session_01OLD", "title": "AB-9 done", "status": "archived"}]
+        code, out, err = self.spawn(live, "AB-12 fix the login")
+        self.assertEqual(code, 2)
+        self.assertIn("session_01OWN", err)
+        self.assertIn("send_message", err)
+        self.assertEqual(out, "")
+        code, out, err = self.spawn(live, "AB-9 again")
+        self.assertEqual(code, 0, err)  # its only session is archived
+        code, out, err = self.spawn({"session_01T": "Rework the pricing page layout"}, "pricing page layout")
+        self.assertEqual(code, 2)
+
+    def test_needs_the_live_list_and_a_model(self):
+        with self.assertRaises(SystemExit):
+            self.run_cli("spawn", "AB-1", "--live", self.root / "missing.json", "--prompt", "x")
+        Path(os.environ["DESK_CONFIG"]).write_text(json.dumps({"title": "T", "page": PAGE}))
+        tasks.load_config()
+        code, out, err = self.spawn([], "AB-1", "--source-url", "https://github.com/o/r")
+        self.assertEqual(code, 2)
+        self.assertIn("no model", err)
 
 
 class Held(Base):
@@ -1178,6 +1367,38 @@ class DeskTests(Base):
         row = json.loads(Path(w["file_path"]).read_text())
         self.assertEqual(row, {"text": "The swipe skips a card", "from": "chat", "at": NOW})
 
+    def test_a_routine_leaves_its_result_in_the_inbox_and_a_watch_only_what_is_new(self):
+        # 4d: routines never write cards; their results are notes for the keeper to sort.
+        self.addCleanup(setattr, tasks, "ROUTINES", tasks.ROUTINES)
+        tasks.ROUTINES = self.root / "routines"
+        out = self.root / "note"
+        code, o, err = self.run_cli("note", "--routine", "nightly", "--text", "2 new failures", "--out", out, "--now", NOW)
+        self.assertEqual(code, 0, err)
+        w = json.loads(o)["write"]
+        row = json.loads(Path(w["file_path"]).read_text())
+        self.assertEqual((row["from"], row["routine"]), ("routine:nightly", "nightly"))
+        # A watch: the same text again writes nothing; new text does.
+        for text, new in (("PR 3 merged", True), ("PR 3 merged", False), ("PR 4 merged", True)):
+            code, o, err = self.run_cli("note", "--routine", "prs", "--only-new", "--text", text, "--out", out, "--now", NOW)
+            self.assertEqual(code, 0, err)
+            self.assertEqual("write" in json.loads(o), new, text)
+        code, o, _ = self.run_cli("note", "--routine", "prs", "--only-new", "--text", "", "--out", out)
+        self.assertTrue(json.loads(o)["nothing_new"])
+        self.assertTrue(any((self.root / "routines").rglob("prs.json")))
+        # Its state stays out of git.
+        repo = self.root / "repo"
+        repo.mkdir()
+        sh(repo, "init", "-q")
+        tasks.ROUTINES = repo / "state"
+        with self.assertRaises(SystemExit):
+            self.run_cli("note", "--routine", "prs", "--only-new", "--text", "x", "--out", out)
+
+    def test_inbox_names_a_routines_note(self):
+        (self.note_dir() / "n-1.json").write_text(json.dumps(
+            {"text": "3 stale branches", "from": "routine:sweep", "routine": "sweep", "at": NOW}))
+        code, out, _ = self.run_cli("inbox", self.dir)
+        self.assertIn("routine sweep", out)
+
     def test_prep_stops_on_unsorted_notes_and_sorted_clears_them(self):
         self.put("a", waiting())
         (self.note_dir() / "n-1.json").write_text(json.dumps({"text": "fix the dashes", "from": "page", "at": NOW}))
@@ -1303,6 +1524,20 @@ class DeskTests(Base):
         for f in ("setup/SKILL.md", "desk/SKILL.md", "desk-keeper/SKILL.md"):
             text = " ".join((skills / f).read_text().split())
             self.assertIn("publish again until it goes through", text, f)
+
+    def test_core_skill_is_short_and_the_reference_has_the_rest(self):
+        # 4b: what a turn needs stays in SKILL.md; the rest is read on demand from reference.md.
+        here = tasks.PLUGIN_REPO / "skills" / "desk"
+        core, ref = (here / "SKILL.md").read_text(), (here / "reference.md").read_text()
+        self.assertLess(len(core.splitlines()), 120)
+        self.assertIn("reference.md", core)
+        for n in range(1, 18):
+            self.assertRegex(core, rf"(?m)^{n}\. \*\*", f"rule {n} in the core")
+            self.assertRegex(ref, rf"(?m)^{n}\. \*\*", f"rule {n} in the reference")
+        # Every command is documented in the reference.
+        for name in re.findall(r'sub\.add_parser\("([\w-]+)"|cmd\("([\w-]+)", cmd_', (here / "desk.py").read_text()):
+            name = next(x for x in name if x)
+            self.assertTrue(f"$S {name}" in ref, f"{name} is not in reference.md")
 
     def test_real_template_renders(self):
         out = self.root / "p.html"

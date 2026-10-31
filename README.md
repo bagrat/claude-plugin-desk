@@ -35,7 +35,7 @@ New rules reach a Desk by `/desk:update`: its keeper runs it when told a fix mer
 
 | Path | What |
 | --- | --- |
-| `skills/desk/` | The rules (`SKILL.md`) and `desk.py`, the bookkeeping script, with its tests. |
+| `skills/desk/` | The rules (`SKILL.md`, the core; `reference.md`, the rest) and `desk.py`, the bookkeeping script, with its tests. |
 | `skills/desk-keeper/` | What a keeper does before every message. |
 | `skills/note`, `look`, `setup`, `feedback`, `update` | `/desk:note`, `/desk:look`, `/desk:setup`, `/desk:feedback`, `/desk:update`. |
 | `skills/desk-fixer/` | The fixer: one session per issue on this repo, started by a routine. |

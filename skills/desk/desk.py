@@ -51,6 +51,7 @@ NEWS_DROPS = ("ask", "recommend", "ifNone") + ANSWER_FIELDS + ("workingSince", "
                                                               "rank", "rankByHand", "blocks", "kind", "note")
 # Rule 3: a waiting card thinner than this, with no folds, is flagged for its context.
 THIN_CONTEXT = 300
+ROW_BYTES = 8 * 1024  # 4c: a row past this is flagged
 ACTIVE_HOURS = 3
 # Rule 13: when the keeper last pushed the owner about a waiting card.
 PUSHED = "pushedAt"
@@ -394,6 +395,10 @@ def settled(text, m):
                 or (before.rstrip().endswith("(") and STAMP.match(after)))
 
 
+def row_bytes(r):
+    return len(json.dumps(r.data, ensure_ascii=False).encode())
+
+
 def check(rows, now, sessions=None, stale_hours=12):
     """Problems, each (row id, message). Rules 1-5, 9, 12, 13 and 14."""
     out = []
@@ -453,7 +458,10 @@ def check(rows, now, sessions=None, stale_hours=12):
                 if any(b == "blocked" for b in buckets.values()):
                     blocked = [s for s, b in buckets.items() if b == "blocked"]
                     say(r, f"session blocked: {', '.join(blocked)}: push the owner with what to approve")
-                if buckets and not unseen and not any(b == "working" for b in buckets.values()):
+                if buckets and not unseen and all(b == "completed" for b in buckets.values()):
+                    say(r, f"its step is over (every session completed): close it this turn: news with a recap, "
+                           f"a check card for what to try by hand, or done; or waiting if the owner is next (rule 9)")
+                elif buckets and not unseen and not any(b == "working" for b in buckets.values()):
                     shown = ", ".join(f"{s} {b}" for s, b in buckets.items())
                     say(r, f"working but no session is ({shown}): waiting if the owner is next, Later (scheduled, with when) if it's held for a release or a date, or close it; still working only while a session waits on its own CI (rule 1)")
             last = max([t for t in (parse_time(r.get("workingSince")), parse_time(r.get("updatedAt"))) if t], default=None)
@@ -481,6 +489,13 @@ def check(rows, now, sessions=None, stale_hours=12):
             out.extend((r.id, m) for m in image_files_problems(r))
             if st != "news":
                 out.extend((r.id, m) for m in deps_problems(r, rows))
+
+    # A row past 8 KB is slow to read and write each turn (4c).
+    for r in rows:
+        size = row_bytes(r)
+        if size > ROW_BYTES:
+            say(r, f"row is {size / 1024:.1f} KB, past {ROW_BYTES // 1024} KB: trim it: summarize settled folds, "
+                   "drop superseded ones and their images, close what's finished (rule 3)")
 
     # A card's number is its place now (rule 1); a stored one is left over from 0.2.9.
     for r in rows:
@@ -544,6 +559,44 @@ def unheld_asks(text, rows):
         w = words(q)
         if w and not any(len(w & h) / len(w) >= 0.6 for h in held):
             out.append(q)
+    return out
+
+
+def sentences(text):
+    return [x.strip() for x in re.split(r"(?<=[.!?])\s+|\n+", str(text or "")) if x.strip()]
+
+
+def rulings_files(given=None):
+    """The files that hold the owner's rulings: --ruled, and desk.json's "rulings" (paths from the
+    project's root, where .claude/ sits)."""
+    out = [Path(g) for g in given or []]
+    if CONFIG_PATH:
+        base = CONFIG_PATH.parent.parent
+        out += [base / f for f in CONFIG.get("rulings") or []]
+    return [f for f in out if f.is_file()]
+
+
+def settled_asks(text, rows, files=()):
+    """Review §9: each question in the draft the owner already answered (a card's answer or its
+    "Settled so far" fold) or ruled on (a line in a rulings file). Each (question, where)."""
+    known = []
+    for r in rows:
+        if r.get("answer"):
+            known.append((f"{r.id}'s answer", f"{r.get('ask') or ''} {r.get('answer')}"))
+        for f in r.get("details") or []:
+            if f.get("title") == "Settled so far":
+                known += [(f"{r.id}'s Settled so far", x) for x in sentences(f.get("text"))]
+    for f in files:
+        for i, line in enumerate(Path(f).read_text().splitlines(), 1):
+            if line.strip():
+                known.append((f"{f.name}:{i}", line))
+    known = [(where, words(t)) for where, t in known]
+    out = []
+    for q in message_asks(text):
+        w = words(q)
+        hit = next((where for where, k in known if w and len(w & k) / len(w) >= 0.6), None)
+        if hit:
+            out.append((q, hit))
     return out
 
 
@@ -814,6 +867,9 @@ def write_patch(rows_d, row, patch, if_version, out_dir=None):
     row.version = None
     row.save()
     spend_version(row)
+    if row_bytes(row) > ROW_BYTES:
+        print(f"warning: {row.id} is {row_bytes(row) / 1024:.1f} KB after this write, past {ROW_BYTES // 1024} KB: trim it (rule 3)",
+              file=sys.stderr)
     entry = {"op": "update", "collection": COLLECTION, "doc_id": row.id, "file_path": str(pf.resolve())}
     if version is not None:
         entry["if_version"] = version
@@ -1024,6 +1080,243 @@ def set_images(row, images, fold=None, drop_top=False):
     return patch, sorted(before - after)
 
 
+# ---------------------------------------------------------------- one call for a turn (4a)
+
+PLAN_KEYS = ("moves", "deps", "images", "rank", "pushed", "sorted")
+MOVE_ARGS = ("note", "ask", "recommend", "ifnone", "settled", "session", "active", "context", "kind", "link")
+
+
+def local(row, patch):
+    """Apply a patch to a row in memory only."""
+    for k, v in patch.items():
+        if v == DELETE:
+            row.data.pop(k, None)
+        else:
+            row.data[k] = v
+
+
+def apply_plan(rows, notes, plan, now):
+    """A turn's moves, dependsOn items, image swaps, ranks, pushed marks and sorted notes, in that
+    order, each judged on the rows as the earlier ones left them. Returns (patches {id: patch},
+    deleted [row], sorted [note], unused asset ids, messages). Raises ValueError before anything
+    is written: the whole plan goes, or none of it."""
+    unknown = set(plan) - set(PLAN_KEYS)
+    if unknown:
+        raise ValueError(f"unknown plan keys: {', '.join(sorted(unknown))} (use {', '.join(PLAN_KEYS)})")
+    by_id = {r.id: r for r in rows}
+    original = {r.id: set(r.data) for r in rows}
+    patches, deleted, gone, said = {}, [], [], []
+
+    def row(rid, what):
+        r = by_id.get(rid)
+        if r is None or r in deleted:
+            raise ValueError(f"{what}: no row {rid!r}")
+        return r
+
+    def put(r, patch):
+        local(r, patch)
+        patches.setdefault(r.id, {}).update(patch)
+
+    for m in plan.get("moves") or []:
+        r, to = row(m.get("id"), "move"), m.get("to")
+        if to not in ("news", "working", "waiting", "held", "done"):
+            raise ValueError(f"move {r.id}: to {to!r}: news, working, waiting, held or done")
+        bad = set(m) - {"id", "to", *MOVE_ARGS}
+        if bad:
+            raise ValueError(f"move {r.id}: unknown fields {', '.join(sorted(bad))}")
+        if to in ("waiting", "held") and r.get("answer") and m.get("settled") is None:
+            said.append(f"note: {r.id}: the old answer leaves: “{r.get('answer')}”. Keep what it settled with settled.")
+        try:
+            patch = move(r, to, now, **{k: m.get(k) for k in MOVE_ARGS if k != "active"}, active=bool(m.get("active")))
+        except ValueError as e:
+            raise ValueError(f"move {r.id}: {e}") from None
+        if patch is None:
+            deleted.append(r)
+        else:
+            put(r, patch)
+        for d, dp in dependents([x for x in rows if x not in deleted], r.id, DEP_OF_STATE[to]):
+            dp["updatedAt"] = iso(now)
+            said.append(f"note: {d.id} depends on {r.id}: its item set to {DEP_OF_STATE[to]}.")
+            put(d, dp)
+    for d in plan.get("deps") or []:
+        r = row(d.get("id"), "dep")
+        try:
+            patch = set_dep(r, d.get("item", ""), d.get("state"), d.get("card"), bool(d.get("add")))
+        except ValueError as e:
+            raise ValueError(f"dep {r.id}: {e}") from None
+        patch["updatedAt"] = iso(now)
+        put(r, patch)
+    for im in plan.get("images") or []:
+        r = row(im.get("id"), "images")
+        if bool(im.get("top")) == bool(im.get("fold")):
+            raise ValueError(f"images {r.id}: give top: true or a fold")
+        try:
+            images = [dict(x) for x in im.get("images") or []]
+            for x in images:
+                if not re.fullmatch(r"[0-9a-f]{32}", str(x.get("id", ""))):
+                    raise ValueError(f"not an asset id: {x.get('id')!r}")
+            patch, unused = set_images(r, images, None if im.get("top") else str(im["fold"]), bool(im.get("drop_top")))
+        except ValueError as e:
+            raise ValueError(f"images {r.id}: {e}") from None
+        put(r, patch)
+        gone += [g for g in unused if g not in gone]
+    for k in plan.get("rank") or []:
+        r = row(k.get("id"), "rank")
+        if r.get("state") != "waiting" or held(r):
+            raise ValueError(f"rank {r.id}: it isn't in the waiting deck (rule 7)")
+        if not isinstance(k.get("place"), int) or k["place"] < 1:
+            raise ValueError(f"rank {r.id}: give its place, from 1")
+        for rid, n in placed([x for x in rows if x not in deleted], r.id, k["place"]).items():
+            if by_id[rid].get("rank") != n:
+                put(by_id[rid], {"rank": n})
+    for rid in plan.get("pushed") or []:
+        put(row(rid, "pushed"), {PUSHED: iso(now)})
+    by_note = {n.id: n for n in notes}
+    done_notes = []
+    for nid in plan.get("sorted") or []:
+        n = by_note.get(nid)
+        if n is None:
+            raise ValueError(f"sorted: no note {nid!r} in the inbox dump")
+        done_notes.append(n)
+    # A field the row never had needs no delete; a deleted row needs no patch.
+    out = {}
+    for rid, patch in patches.items():
+        if by_id[rid] in deleted:
+            continue
+        p = {k: v for k, v in patch.items() if not (v == DELETE and k not in original[rid])}
+        if p:
+            out[rid] = p
+    return out, deleted, done_notes, gone, said
+
+
+def cmd_apply(a):
+    """One call for the turn: every write it makes, in one batch."""
+    rows, now = load_rows(a.rows), now_arg(a.now)
+    notes = load_inbox(a.rows)
+    try:
+        plan = json.loads(sys.stdin.read() if a.plan == "-" else Path(a.plan).read_text())
+        if not isinstance(plan, dict):
+            raise ValueError("a plan is a JSON object")
+        versions = {r.id: r.version for r in rows}
+        patches, deleted, done_notes, gone, said = apply_plan(rows, notes, plan, now)
+    except ValueError as e:
+        print(f"refused: {e}", file=sys.stderr)
+        return 2
+    for s in said:
+        print(s, file=sys.stderr)
+    by_id = {r.id: r for r in rows}
+    writes = [write_patch(a.rows, by_id[rid], p, versions[rid], a.out) for rid, p in patches.items()]
+    writes += [delete_entry(r, versions[r.id]) for r in deleted]
+    for n in done_notes:
+        e = {"op": "delete", "collection": INBOX, "doc_id": n.id}
+        if n.version is not None:
+            e["if_version"] = n.version
+        n.path.unlink()
+        writes.append(e)
+    if any("if_version" not in w for w in writes):
+        print("note: some rows have no version known; add if_version from the list result.", file=sys.stderr)
+    print(json.dumps({"writes": writes, "delete_assets": gone}, ensure_ascii=False, indent=2))
+    return 0
+
+
+# ---------------------------------------------------------------- spawning a session (review §3, §7)
+
+SEND = "mcp__claude-code-remote__send_message"
+GONE = {"archived", "completed", "failed", "deleted"}
+HANDLE = re.compile(r"\b[A-Z][A-Z0-9]+-\d+\b|#\d+\b")
+
+
+def live_sessions(raw):
+    """The live sessions from a list_sessions result as pasted: a list, {"sessions": [...]}, or
+    {id: title}. Each (id, title); archived, completed and failed ones are left out."""
+    if isinstance(raw, dict) and isinstance(raw.get("sessions"), list):
+        raw = raw["sessions"]
+    if isinstance(raw, dict):
+        raw = [{"id": k, "title": v} for k, v in raw.items()]
+    out = []
+    for x in raw if isinstance(raw, list) else []:
+        if not isinstance(x, dict):
+            continue
+        sid = x.get("id") or x.get("session_id") or ""
+        status = re.sub(r"^.*_", "", str(x.get("status_bucket") or x.get("status") or "")).lower()
+        if sid and status not in GONE:
+            out.append((sid, str(x.get("title") or "")))
+    return out
+
+
+def same_task(task, title):
+    """A live session already on this task: its handle (AI-138, #57) in the title, or most of
+    the task's words."""
+    hs = {h.lower() for h in HANDLE.findall(task)}
+    if hs:
+        return bool(hs & {h.lower() for h in HANDLE.findall(title)})
+    w = words(task)
+    return bool(w) and len(w & words(title)) / len(w) >= 0.6
+
+
+def slug(text):
+    return re.sub(r"-+", "-", re.sub(r"[^a-z0-9]+", "-", text.lower())).strip("-")[:40] or "task"
+
+
+def origin_url():
+    root = git_root(CONFIG_PATH.parent) if CONFIG_PATH else None
+    try:
+        return git(root, "remote", "get-url", "origin") if root else None
+    except (RuntimeError, OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def spawn_args(task, prompt, live, kind=None, model=None, source_url=None, branch=None, title=None, tags=None):
+    """The create_session arguments for a new child, or ValueError: one live session per task,
+    and every default set (auto mode, send_message pre-approved, the repo, the branch, the model)."""
+    owner = [(sid, t) for sid, t in live if same_task(task, t)]
+    if owner:
+        sid, t = owner[0]
+        raise ValueError(f"{sid} (“{t}”) is live on this task: send_message it there instead of a new session "
+                         f"(one live session per task)")
+    cfg = CONFIG.get("spawn") or {}
+    model = model or (cfg.get("models") or {}).get(kind or "") or cfg.get("model")
+    if not model:
+        raise ValueError("no model: pass --model, or set spawn.model (and spawn.models per kind) in desk.json")
+    source_url = source_url or cfg.get("source_url") or origin_url()
+    if not source_url:
+        raise ValueError("no repo: pass --source-url, or set spawn.source_url in desk.json")
+    keeper = CONFIG.get("keeper")
+    report = (f"\n\nYou're a child of the keeper ({keeper}). Report to it with send_message when you open or "
+              "merge a PR, get blocked, or need the owner; nothing for routine progress. Never push the owner "
+              "yourself; the keeper does.") if keeper else ""
+    args = {
+        "title": title or task,
+        "prompt": prompt.rstrip() + report,
+        "source_url": source_url,
+        "outcome_branch": branch or f"claude/{slug(task)}",
+        "permission_mode": "auto",
+        "extra_allowed_tools": sorted(set(cfg.get("extra_allowed_tools") or []) | {SEND}),
+        "model": model,
+    }
+    if tags:
+        args["tags"] = tags
+    return args
+
+
+def cmd_spawn(a):
+    """A child session for one task: refuses while a live session holds it, prints create_session's arguments."""
+    try:
+        raw = json.loads(Path(a.live).read_text())
+    except (OSError, ValueError) as e:
+        sys.exit(f"can't read the live sessions {a.live}: {e} (paste list_sessions' result there first)")
+    prompt = Path(a.prompt_file).read_text() if a.prompt_file else (a.prompt or "")
+    if not prompt.strip():
+        sys.exit("an empty prompt: --prompt or --prompt-file")
+    try:
+        args = spawn_args(a.task, prompt, live_sessions(raw), a.kind, a.model, a.source_url, a.branch, a.title, a.tag)
+    except ValueError as e:
+        print(f"refused: {e}", file=sys.stderr)
+        return 2
+    print(json.dumps(args, ensure_ascii=False, indent=2))
+    return 0
+
+
 # ---------------------------------------------------------------- a fresh read (rule 12)
 
 # How old a dump may be when prep and footer count it: Seen on the page deletes rows meanwhile.
@@ -1196,7 +1489,7 @@ def short(text, n=90):
 def cmd_inbox(a):
     notes = load_inbox(a.rows)
     for n in notes:
-        bits = [n.get("at") or "?", n.get("from") or "?"]
+        bits = [n.get("at") or "?", f"routine {n.get('routine')}" if n.get("routine") else n.get("from") or "?"]
         if n.get("images"):
             bits.append(f"{len(n.get('images'))} image(s)")
         if n.get("sendErr"):
@@ -1222,20 +1515,56 @@ def cmd_sorted(a):
     return 0
 
 
+ROUTINES = Path(os.environ.get("DESK_ROUTINES") or Path.home() / ".cache" / "desk" / "routines")
+
+
+def routine_state(name):
+    """Where a watch keeps what it last reported: per Desk, outside any repo (4d)."""
+    d = ROUTINES / hashlib.sha1((PAGE or "").encode()).hexdigest()[:10]
+    return d / (re.sub(r"[^\w.-]+", "-", name) + ".json")
+
+
 def cmd_note(a):
-    """A raw note for the Inbox, from any session on the Desk's account (/desk:note)."""
+    """A raw note for the Inbox, from any session on the Desk's account (/desk:note), or a
+    routine's result (--routine): routines never write cards; the keeper sorts their notes."""
     if not PAGE:
         sys.exit("no Desk configured here: no .claude/desk.json (pass --desk, or run /desk:setup)")
     text = a.text if a.text is not None else sys.stdin.read()
     if not text.strip():
+        if a.routine:
+            print(json.dumps({"page": PAGE, "nothing_new": True, "routine": a.routine}, indent=2))
+            return 0
         sys.exit("an empty note")
+    if a.only_new and not a.routine:
+        sys.exit("--only-new is for a routine's watch: give --routine NAME")
     now = now_arg(a.now)
+    state, seen = None, None
+    if a.only_new:
+        state = routine_state(a.routine)
+        if git_root(next(p for p in state.parents if p.exists())):
+            sys.exit(f"{state} is inside a git repo: a watch's state stays out of git (set DESK_ROUTINES)")
+        try:
+            seen = json.loads(state.read_text()).get("digest")
+        except (OSError, ValueError):
+            seen = None
+        if seen == hashlib.sha1(text.strip().encode()).hexdigest():
+            print(json.dumps({"page": PAGE, "nothing_new": True, "routine": a.routine}, indent=2))
+            return 0
     nid = note_id(text, now)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     f = out / f"{nid}.json"
-    f.write_text(json.dumps(new_note(text, a.origin, now, parse_images(a.image, a.json) if (a.image or a.json) else None),
-                            ensure_ascii=False, indent=2) + "\n")
+    row = new_note(text, a.origin or (f"routine:{a.routine}" if a.routine else None), now,
+                   parse_images(a.image, a.json) if (a.image or a.json) else None)
+    if not row["from"]:
+        sys.exit("say where the note is from: --from (a session link, a repo, 'chat') or --routine NAME")
+    if a.routine:
+        row["routine"] = a.routine
+    f.write_text(json.dumps(row, ensure_ascii=False, indent=2) + "\n")
+    if state:
+        # What this watch last reported, so the next run writes only what's new.
+        state.parent.mkdir(parents=True, exist_ok=True)
+        state.write_text(json.dumps({"digest": hashlib.sha1(text.strip().encode()).hexdigest(), "at": iso(now)}) + "\n")
     print(json.dumps({"page": PAGE, "keeper": CONFIG.get("keeper"), "write": entry_for(INBOX, nid, f)}, indent=2))
     return 0
 
@@ -1385,27 +1714,66 @@ def describe(r):
     return f"{r.get('handle') or r.id} [{', '.join(bits)}] {r.get('title', '')}"
 
 
-def cmd_order(a):
+def digest(r):
+    return hashlib.sha1(json.dumps(r.data, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
+
+
+def seen_path(d):
+    """What the last prep listed, beside the dumps (each read is a new directory in one scratch)."""
+    return dump_dir(rows_dir(d)).parent / ".desk-seen.json"
+
+
+def unchanged_since_seen(d, rows):
+    """The ids whose rows read the same as at the last prep, and record this read for the next."""
+    f = seen_path(d)
+    try:
+        seen = json.loads(f.read_text()).get(PAGE or "", {})
+    except (OSError, ValueError, AttributeError):
+        seen = {}
+    now = {r.id: digest(r) for r in rows}
+    try:
+        f.write_text(json.dumps({PAGE or "": now}, indent=2) + "\n")
+    except OSError:
+        pass
+    return {rid for rid, h in now.items() if seen.get(rid) == h}
+
+
+def cmd_order(a, unchanged=frozenset()):
+    """The page's order. With `unchanged` (prep), rows the last prep listed as they are now are
+    named only, or counted, not described again."""
     rows, now = load_rows(a.rows), now_arg(a.now)
     deck = ordered(rows, now)
+    same = lambda rs: [r for r in rs if r.id in unchanged]
+    fresh = lambda rs: [r for r in rs if r.id not in unchanged]
+
+    def more(rs):
+        return f"  (+{len(same(rs))} unchanged)" if same(rs) else None
+
     items = news(rows)
     if items:
         print("News:")
-        for r in items:
+        for r in fresh(items):
             print(f"  - {r.get('handle') or r.id}: {r.get('title', '')}")
+        if more(items):
+            print(more(items))
     print("Waiting:")
     for i, r in enumerate(deck, 1):
-        print(f"  {i}. {describe(r)}")
+        print(f"  {i}. {r.get('handle') or r.id} (unchanged)" if r.id in unchanged else f"  {i}. {describe(r)}")
     later = [r for r in by_state(rows, "waiting") if parked(r, now)]
     if later:
         print("Later:")
-        for r in later:
+        for r in fresh(later):
             t = parse_time(r.get("snoozeUntil"))
             back = "review when you ask" if held(r) else f"back {owner_time(t) if t else r.get('snoozeUntil')}"
             print(f"  - {describe(r)} ({back})")
+        if more(later):
+            print(more(later))
     print("In progress:")
-    for r in sorted(by_state(rows, "working"), key=lambda r: str(r.get("workingSince") or r.get("updatedAt") or ""), reverse=True):
+    working_rows = sorted(by_state(rows, "working"), key=lambda r: str(r.get("workingSince") or r.get("updatedAt") or ""), reverse=True)
+    for r in fresh(working_rows):
         print(f"  - {describe(r)}")
+    if more(working_rows):
+        print(more(working_rows))
     return 0
 
 
@@ -1543,16 +1911,23 @@ def cmd_prep(a):
               file=sys.stderr)
     code = cmd_check(a)
     if a.message:
-        for q in unheld_asks(Path(a.message).read_text(), load_rows(a.rows)):
-            print(f"message: “{short(q)}” is on no Waiting card: put it on its card's ask (rule 1)")
+        draft, rows = Path(a.message).read_text(), load_rows(a.rows)
+        settled_qs = settled_asks(draft, rows, rulings_files(a.ruled))
+        for q, where in settled_qs:
+            print(f"message: “{short(q)}” is already answered or ruled ({where}): act on it, don't ask again (rule 5)")
             code = 1
+        for q in unheld_asks(draft, rows):
+            if q not in {x for x, _ in settled_qs}:
+                print(f"message: “{short(q)}” is on no Waiting card: put it on its card's ask (rule 1)")
+                code = 1
     notes = load_inbox(a.rows)
     for n in notes:
         print(f"inbox {n.id}: sort this note into a card, then `sorted` (rule 15): {short(n.get('text'))}")
     code = code or (1 if notes else 0)
     if code == 0:
         print("check: ok")
-    cmd_order(a)
+    rows = load_rows(a.rows)
+    cmd_order(a, frozenset() if a.full else unchanged_since_seen(a.rows, rows))
     print()
     cmd_footer(a)
     return code
@@ -1634,6 +2009,10 @@ def main(argv=None):
             s.add_argument("--max-age", type=float, default=READ_MINUTES,
                            help=f"refuse rows read longer ago than this, in minutes (default {READ_MINUTES})")
             s.add_argument("--message", help="the draft about to go out: flag its questions no Waiting card holds")
+            s.add_argument("--ruled", action="append",
+                           help="a file of the owner's rulings, one per line (also desk.json's rulings)")
+            s.add_argument("--full", action="store_true",
+                           help="describe every row, not only those changed since the last prep")
     s = cmd("footer", cmd_footer, "the footer line")
     s.add_argument("--max-age", type=float, default=READ_MINUTES,
                    help=f"refuse rows read longer ago than this, in minutes (default {READ_MINUTES})")
@@ -1685,13 +2064,20 @@ def main(argv=None):
     s.add_argument("--if-version", type=int)
     s.add_argument("--out")
 
+    s = cmd("apply", cmd_apply, "a turn's moves, deps, images, ranks, pushed marks and sorted notes: one batch")
+    s.add_argument("plan", help="a JSON file (or - for stdin): {moves, deps, images, rank, pushed, sorted}")
+    s.add_argument("--out", help="where patch files go (default: <rows>/../patches)")
+
     cmd("inbox", cmd_inbox, "the notes waiting to be sorted (rule 15)")
     s = cmd("sorted", cmd_sorted, "the deletes for notes now on cards (rule 15)")
     s.add_argument("ids", nargs="+")
 
     s = sub.add_parser("note", help="a note for this Desk's Inbox; writes the row file, prints the write")
     s.add_argument("--text", help="the note (default: read from stdin)")
-    s.add_argument("--from", dest="origin", required=True, help="where it came from: a session link, a repo, 'chat'")
+    s.add_argument("--from", dest="origin", help="where it came from: a session link, a repo, 'chat'")
+    s.add_argument("--routine", help="a routine's result: its name (from defaults to routine:NAME); an empty text is nothing new")
+    s.add_argument("--only-new", action="store_true",
+                   help="a watch: write only when the text differs from what this routine last reported (state kept outside git)")
     s.add_argument("--image", action="append", help="ID=caption: an image already uploaded to the page")
     s.add_argument("--json", help="a JSON list of {id, caption}")
     s.add_argument("--out", required=True, help="the directory for the row file")
@@ -1709,6 +2095,20 @@ def main(argv=None):
     s.add_argument("--out", help="the directory for look.json (default: beside --current's rows, "
                    "in patches/; without --current, a new temp directory)")
     s.set_defaults(fn=cmd_look)
+
+    s = sub.add_parser("spawn", help="a child session for one task: create_session's arguments, never a second session on it")
+    s.add_argument("task", help="the task: its handle (AI-138, #57) or topic; also the default title and branch")
+    s.add_argument("--live", required=True, help="list_sessions' result as pasted (JSON): the sessions live now")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--prompt")
+    g.add_argument("--prompt-file")
+    s.add_argument("--kind", help="the kind of task, for desk.json's spawn.models")
+    s.add_argument("--model")
+    s.add_argument("--source-url", help="default: desk.json's spawn.source_url, or the project's origin")
+    s.add_argument("--branch", help="outcome_branch (default: claude/<task>)")
+    s.add_argument("--title")
+    s.add_argument("--tag", action="append")
+    s.set_defaults(fn=cmd_spawn)
 
     s = sub.add_parser("when", help="a time in the owner's zone: their words to UTC ISO, or an ISO time as they read it")
     s.add_argument("words", help="'tomorrow 9:00', 'today 17:30', '2026-11-02 9:00', or an ISO time with its zone")

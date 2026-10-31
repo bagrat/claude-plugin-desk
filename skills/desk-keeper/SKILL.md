@@ -8,7 +8,8 @@ description: How a Desk's keeper works, the one session per Desk that writes its
 You keep one Desk: the page named in this project's `.claude/desk.json`. The owner talks
 mostly to you. You turn other sessions' reports and the owner's notes into cards, keep the
 page true, and push the owner for what needs them. The rules are the `desk` skill; load it
-with this one. `S=<the desk skill's directory>/desk.py`.
+with this one (its `reference.md` holds the detail, read when you need it).
+`S=<the desk skill's directory>/desk.py`.
 
 ## At the start (and after a handoff)
 
@@ -32,8 +33,10 @@ owner may have cleared news since):
 3. **Sort the Inbox** (rule 15): for each note `inbox` lists, fold it into its task's card,
    make a new card, or act on it and post news; move its images onto the card; then `sorted`.
    A note that is feedback on Desk itself (not this project) goes the `feedback` skill's way.
-4. Make this turn's changes with `move`, `images`, `rank`, `dep`, and send the entries they
-   print with ArtifactData `update` / `delete` / `batch`, pinned to the versions from step 1.
+4. Make this turn's changes in one call: write them as a plan (moves, dependsOn items, image
+   swaps, ranks, pushed marks, sorted notes) and run `python3 $S apply <dir> <plan.json>`; send
+   its `writes` as one ArtifactData `batch` and delete its `delete_assets`. (`move`, `images`,
+   `rank`, `dep`, `pushed` and `sorted` still do one at a time.)
 5. `python3 $S prep <dir> --sessions <scratch>/sessions.json --message <scratch>/draft.md`,
    the draft written first when it asks the owner anything: each question in it must be a
    Waiting card's ask, never a card's note (rule 1). When it stops with "the rules
@@ -64,11 +67,19 @@ When the Desk orchestrator says a fix merged, or `prep` says Desk has an update,
 
 ## Sessions
 
-- **Substantial work gets its own session.** Spawn it and track it rather than doing it,
-  with `permission_mode: "auto"` and `mcp__claude-code-remote__send_message` in
-  `extra_allowed_tools`, or its reports arrive held.
+- **Substantial work gets its own session, from `spawn`.** List the live sessions
+  (list_sessions) into `<scratch>/live.json`, then `python3 $S spawn "<task>" --live
+  <scratch>/live.json --prompt-file <prompt>`: it refuses when a live session already holds
+  the task (send it the question instead), and otherwise prints create_session's arguments,
+  with auto mode, `send_message` pre-approved, the repo, the branch and the model set. Pass
+  them as printed; track the session rather than doing its work. A question about existing
+  work goes to the session that owns it, or a subagent; never a new session.
 - **Only you push the owner.** A child pushes them only when it absolutely needs them and
   can't go through you.
+- **Routines report to the Inbox.** A scheduled task you set up runs as its own short session
+  whose prompt ends with `desk.py note --routine <name> --text "<result>"` and the write it
+  prints (a watch adds `--only-new`, so it writes only when something is new). It never writes
+  a card or pushes the owner; you sort its note like any other (rule 15).
 - **Times in the owner's zone** (`desk.json`'s `timezone`), on cards, in pushes and in the
   chat: `desk.py when` turns "tomorrow 9:00" into the stored UTC and a stored time back. No
   `timezone` yet: ask the owner for theirs, add it, commit, and republish the page.
