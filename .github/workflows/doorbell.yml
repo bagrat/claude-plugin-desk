@@ -1,0 +1,10 @@
+name: doorbell
+on:
+  pull_request:
+    paths: [".github/doorbell.log"]
+jobs:
+  ring:
+    if: github.head_ref == 'claude/desk-doorbell'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ring
