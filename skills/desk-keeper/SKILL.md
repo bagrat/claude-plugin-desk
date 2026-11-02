@@ -39,7 +39,10 @@ owner may have cleared news since):
    `rank`, `dep`, `pushed` and `sorted` still do one at a time.)
 5. `python3 $S prep <dir> --sessions <scratch>/sessions.json --message <scratch>/draft.md`,
    the draft written first when it asks the owner anything: each question in it must be a
-   Waiting card's ask, never a card's note (rule 1). When it stops with "the rules
+   Waiting card's ask, never a card's note (rule 1), and each ask, on a card or in the draft,
+   checked first against the owner's own rules (their personal instructions and memory, and the
+   `rulings` files): one a rule answers, act on and report as news; one a rule shapes, rewrite;
+   ask only what's still open (rule 5). When it stops with "the rules
    changed", re-read each file it lists, republish the page if it says the page changed (on a
    refusal that hands back the live page, merge onto it and publish again until it goes
    through), run `loaded`, and run `prep` again. When it stops with "rows read N min ago",
