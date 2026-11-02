@@ -384,6 +384,30 @@ class Checks(Base):
         self.assertNotIn("headings?” is already", out)
         self.assertEqual(out.count("on no Waiting card"), 0)
 
+    def test_prep_checks_a_new_ask_against_the_owners_rules(self):
+        # Issue #60: an ask goes on a card only once the owner's own rules leave it open.
+        self.put("a", waiting(title="Two stale inbox items", ask="OK to mark the two stale inbox items read?",
+                              recommend="Yes, mark them read.", pushedAt=None))
+        self.put("b", waiting(title="Pick a launch date", ask="Launch on the 12th or the 19th?",
+                              recommend="The 19th."))
+        ruled = self.root / "rulings.md"
+        ruled.write_text("- Marking stale inbox items read has a standing yes; report it as news.\n")
+        code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-rules", "--ruled", ruled)
+        self.assertEqual(code, 1, out)
+        self.assertIn("a: its ask is ruled (rulings.md:1)", out)
+        self.assertNotIn("b: its ask is ruled", out)
+        # A new card's push names the check against what only the keeper has loaded.
+        self.assertIn("check its ask against the owner's own rules", out)
+        self.assertIn("instructions and memory", out)
+        # A draft that asks anything names the check too.
+        draft = self.root / "draft.md"
+        draft.write_text("1. Launch on the 12th or the 19th?\n")
+        code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-rules", "--message", draft)
+        self.assertIn("message: 1 ask: check each against the owner's own rules", out)
+        draft.write_text("All set: the menu shipped.\n")
+        code, out, _ = self.run_cli("prep", self.dir, "--now", NOW, "--no-rules", "--message", draft)
+        self.assertNotIn("message: 1 ask", out)
+
     def test_rulings_named_in_desk_json(self):
         (self.root / "notes").mkdir()
         (self.root / "notes" / "rulings.md").write_text("Reviews wait until the owner asks for them.\n")

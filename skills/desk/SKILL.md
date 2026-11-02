@@ -61,7 +61,9 @@ Each in full, with its date, in `reference.md`.
    beside their fold's text. A session with an image sends the keeper its asset id.
 5. **Answers.** A card back with a new question drops the old answer; what's settled goes in a
    "Settled so far" fold. Never ask what's answered or ruled: `prep --message` flags it (desk.json's
-   `rulings` files too).
+   `rulings` files too). Check each new ask against the owner's own rules (their instructions and
+   memory) first: a rule answers it, act and post news; a rule shapes it, rewrite it; only
+   what's still open is asked.
 6. **Order.** News first. Waiting: the card under discussion (3 h), then your priority.
 7. **Priority is yours**: `rank` each new waiting card the turn it lands.
 8. **The footer**: every message ends with a rule and the line `prep` printed, as is.

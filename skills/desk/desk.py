@@ -444,7 +444,10 @@ def check(rows, now, sessions=None, stale_hours=12):
                 say(r, "a step off the page (kind step) with no link: put it first in links, "
                        f"move {r.id} waiting --link 'Label=https://…' (rule 10)")
             if needs_push(r, now):
-                say(r, "waiting and not pushed yet: push the owner (one push for all new ones), then `pushed` (rule 13)")
+                say(r, "waiting and not pushed yet: first check its ask against the owner's own rules (their "
+                       "instructions and memory, and the rulings files): one that answers it, act on it and post news "
+                       "instead; one on how to ask, rewrite the ask (rule 5). Then push the owner (one push for all new "
+                       "ones), then `pushed` (rule 13)")
 
         if st == "working":
             ids = session_ids(r)
@@ -576,6 +579,34 @@ def rulings_files(given=None):
     return [f for f in out if f.is_file()]
 
 
+def ruling_lines(files):
+    """Each non-empty line of the rulings files, as (where, text)."""
+    return [(f"{f.name}:{i}", line) for f in files
+            for i, line in enumerate(Path(f).read_text().splitlines(), 1) if line.strip()]
+
+
+def matched(questions, known):
+    """Each question that shares most of its words with a known answer or ruling: (question, where)."""
+    known = [(where, words(t)) for where, t in known]
+    out = []
+    for q in questions:
+        w = words(q)
+        hit = next((where for where, k in known if w and len(w & k) / len(w) >= 0.6), None)
+        if hit:
+            out.append((q, hit))
+    return out
+
+
+def ruled_cards(rows, files, now):
+    """Issue #60: each new waiting card (not pushed yet) whose ask a ruling already answers: (row, where)."""
+    known = ruling_lines(files)
+    out = []
+    for r in rows:
+        if needs_push(r, now) and r.get("ask"):
+            out += [(r, where) for _, where in matched([r.get("ask")], known)]
+    return out
+
+
 def settled_asks(text, rows, files=()):
     """Review §9: each question in the draft the owner already answered (a card's answer or its
     "Settled so far" fold) or ruled on (a line in a rulings file). Each (question, where)."""
@@ -586,18 +617,7 @@ def settled_asks(text, rows, files=()):
         for f in r.get("details") or []:
             if f.get("title") == "Settled so far":
                 known += [(f"{r.id}'s Settled so far", x) for x in sentences(f.get("text"))]
-    for f in files:
-        for i, line in enumerate(Path(f).read_text().splitlines(), 1):
-            if line.strip():
-                known.append((f"{f.name}:{i}", line))
-    known = [(where, words(t)) for where, t in known]
-    out = []
-    for q in message_asks(text):
-        w = words(q)
-        hit = next((where for where, k in known if w and len(w & k) / len(w) >= 0.6), None)
-        if hit:
-            out.append((q, hit))
-    return out
+    return matched(message_asks(text), known + ruling_lines(files))
 
 
 def dep_state_of(card):
@@ -1910,8 +1930,17 @@ def cmd_prep(a):
         print("warning: desk.json has no timezone: ask the owner theirs (an IANA name) and add it; times read as UTC till then",
               file=sys.stderr)
     code = cmd_check(a)
+    for r, where in ruled_cards(load_rows(a.rows), rulings_files(a.ruled), now_arg(a.now)):
+        print(f"{r.id}: its ask is ruled ({where}): act on the ruling, post what you did as news, "
+              f"and take the ask off the card (rule 5)")
+        code = 1
     if a.message:
         draft, rows = Path(a.message).read_text(), load_rows(a.rows)
+        asks = message_asks(draft)
+        if asks:
+            print(f"message: {len(asks)} ask{'s' if len(asks) > 1 else ''}: check each against the owner's own "
+                  f"rules (their instructions and memory, and the rulings files) before it's asked: one a rule "
+                  f"answers, act on and report as news; one a rule shapes, rewrite; ask only what's still open (rule 5)")
         settled_qs = settled_asks(draft, rows, rulings_files(a.ruled))
         for q, where in settled_qs:
             print(f"message: “{short(q)}” is already answered or ruled ({where}): act on it, don't ask again (rule 5)")
